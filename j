@@ -22,6 +22,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer    = Players.LocalPlayer
 local PlayerGui      = LocalPlayer:WaitForChild("PlayerGui")
 
+-- ─── Filesystem stubs (some executors lack these, Rayfield crashes without them)
+if not isfolder then isfolder = function() return false end end
+if not makefolder then makefolder = function() end end
+if not isfile then isfile = function() return false end end
+if not readfile then readfile = function() return "" end end
+if not writefile then writefile = function() end end
+if not delfile then delfile = function() end end
+
 -- ─── Load Rayfield ────────────────────────────────────────────────────────────
 local Rayfield = loadstring(game:HttpGet(
     "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua"
@@ -362,11 +370,9 @@ end)
 local Window = Rayfield:CreateWindow({
     Name            = "Hatch Cows Auto",
     LoadingTitle    = "Hatch Cows Auto",
-    LoadingSubtitle = "Initialising...",
+    LoadingSubtitle = "by mercifulzack-hub",
     ConfigurationSaving = {
-        Enabled    = true,
-        FolderName = "HatchCowsAuto",
-        FileName   = "Config",
+        Enabled    = false,
     },
     Discord   = { Enabled = false },
     KeySystem = false,

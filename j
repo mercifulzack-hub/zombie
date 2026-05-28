@@ -1,3 +1,22 @@
+--[[
+    Hatch Cows Auto - Full Script
+    UI: Rayfield (CustomFIeld fork) | No key system
+    All remotes verified from game source code.
+
+    Exploitable remotes confirmed:
+      AddCow(name, rarityIdx, variant?)  - fires any cow into inventory
+      SellMilk()                        - sells all milk
+      MerchantBuy(item)                 - buys CheesePack / TicketPack
+      PurchaseSkill(id)                 - buys skill tree node
+      Rebirth()                         - performs rebirth
+      SetSettings(key, value)           - changes server settings
+      FuseStart(cow1, cow2)             - starts a fuse
+      FuseClaim()                       - claims fuse result
+      UseItem(id)                       - uses an item
+      ClaimOffline()                    - claims offline earnings
+      SyncEquipped(table)               - syncs equipped cow list
+]]
+
 local Players        = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer    = Players.LocalPlayer
@@ -27,6 +46,27 @@ local FuseStart      = Events:WaitForChild("FuseStart")
 local FuseClaim      = Events:WaitForChild("FuseClaim")
 local UseItem        = Events:WaitForChild("UseItem")
 local ClaimOffline   = Events:WaitForChild("ClaimOffline")
+local UnlockBiome    = Events:WaitForChild("UnlockBiome")
+
+-- ─── Biome Gate Config ───────────────────────────────────────────────────────
+-- Inlined from BiomeGateConfig.lua (in order)
+local BIOME_GATES = {
+    { biomeId="Biome 2",  biomeName="Desert",       cost=5000 },
+    { biomeId="Biome 3",  biomeName="Tundra",        cost=25000 },
+    { biomeId="Biome 4",  biomeName="Volcano",       cost=75000 },
+    { biomeId="Biome 5",  biomeName="Blossom",       cost=300000 },
+    { biomeId="Biome 6",  biomeName="Swamp",         cost=1200000 },
+    { biomeId="Biome 7",  biomeName="Crystal Cave",  cost=4200000 },
+    { biomeId="Biome 8",  biomeName="Savanna",       cost=21000000 },
+    { biomeId="Biome 9",  biomeName="Arctic",        cost=63000000 },
+    { biomeId="Biome 10", biomeName="Mushroom",      cost=285000000 },
+    { biomeId="Biome 11", biomeName="Jungle",        cost=1000000000 },
+    { biomeId="Biome 12", biomeName="Wild West",     cost=4000000000 },
+    { biomeId="Biome 13", biomeName="Autumn",        cost=20000000000 },
+    { biomeId="Biome 14", biomeName="Haunted",       cost=60000000000 },
+    { biomeId="Biome 15", biomeName="Coral Reef",    cost=270000000000 },
+    { biomeId="Biome 16", biomeName="Meteor",        cost=950000000000 },
+}
 
 -- ─── Game Config ──────────────────────────────────────────────────────────────
 -- Inlined from SkillTreeConfig.lua (can't use require() in executor context)
@@ -121,9 +161,10 @@ local State = {
     Money        = 0,
     Milk         = 0,
     Rolls        = 0,
-    MilkPrice    = 1,
-    MerchantData = nil,
-    LastActivity = tick(),
+    MilkPrice       = 1,
+    MerchantData    = nil,
+    UnlockedBiomes  = {},
+    LastActivity    = tick(),
 }
 
 -- ─── Config Flags ─────────────────────────────────────────────────────────────
@@ -138,6 +179,7 @@ local Cfg = {
     AutoEquipBest  = false,
     AutoRebirth    = false,
     AntiAFK        = false,
+    AutoUnlockBiome = false,
     -- Spawn cow settings
     SelectedCow    = "Reaper",
 }
@@ -148,7 +190,8 @@ DataUpdate.OnClientEvent:Connect(function(data)
     if data.Money      ~= nil then State.Money        = data.Money end
     if data.Milk       ~= nil then State.Milk         = data.Milk  end
     if data.TotalRolls ~= nil then State.Rolls        = data.TotalRolls end
-    if data.Merchant   ~= nil then State.MerchantData = data.Merchant end
+    if data.Merchant        ~= nil then State.MerchantData    = data.Merchant end
+    if data.UnlockedBiomes  ~= nil then State.UnlockedBiomes = data.UnlockedBiomes end
     State.LastActivity = tick()
 end)
 
@@ -255,6 +298,44 @@ task.spawn(function()
                     local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
                     if btn then pcall(function() btn.MouseButton1Click:Fire() end) end
                 end
+            end
+        end
+    end
+end)
+
+-- ─── Teleport helper ────────────────────────────────────────────────────────
+local function tpToBiome(biomeId)
+    local gates = workspace:FindFirstChild("New Gates")
+    if not gates then return end
+    for _, g in ipairs(gates:GetChildren()) do
+        if g:GetAttribute("BiomeId") == biomeId then
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                local pos = g:GetPivot().Position + Vector3.new(0, 5, 15)
+                root.CFrame = CFrame.new(pos)
+                print("[HatchCowsAuto] Teleported to " .. biomeId)
+            end
+            return
+        end
+    end
+end
+
+-- ─── Auto Unlock Biome ──────────────────────────────────────────────────────
+-- UnlockBiome:FireServer(biomeId) confirmed in BiomeGatesClient.lua:709
+-- Server checks Money >= cost and that biome isn't already unlocked
+task.spawn(function()
+    while task.wait(8) do
+        if not Cfg.AutoUnlockBiome then continue end
+        for _, gate in ipairs(BIOME_GATES) do
+            if not State.UnlockedBiomes[gate.biomeId] then
+                if State.Money >= gate.cost then
+                    pcall(function() UnlockBiome:FireServer(gate.biomeId) end)
+                    print("[HatchCowsAuto] Unlocked biome: " .. gate.biomeName)
+                    task.wait(2)
+                    tpToBiome(gate.biomeId)
+                end
+                break
             end
         end
     end
@@ -384,6 +465,16 @@ AutoTab:CreateToggle({
     CurrentValue = false,
     Flag         = "AutoRebirth",
     Callback     = function(v) Cfg.AutoRebirth = v end,
+})
+
+AutoTab:CreateSection("Worlds", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Unlock Next World",
+    Info         = "Fires UnlockBiome when you can afford the next locked biome. Checks every 8 seconds.",
+    CurrentValue = false,
+    Flag         = "AutoUnlockBiome",
+    Callback     = function(v) Cfg.AutoUnlockBiome = v end,
 })
 
 -- ══ Tab: Spawn Cow ═══════════════════════════════════════════════════════════

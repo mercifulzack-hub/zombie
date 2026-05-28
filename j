@@ -16,7 +16,83 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 
-local CowData = require(ReplicatedStorage:WaitForChild("CowData"))
+local CowData
+local hasCowData, err = pcall(function()
+    return require(ReplicatedStorage:WaitForChild("CowData"))
+end)
+
+-- Failsafe CowData definitions if require("CowData") is sandboxed/blocked by executor
+local LocalCowData = {
+    Rarities = {
+        { name = "COMMON", chance = 2 },
+        { name = "UNCOMMON", chance = 8 },
+        { name = "RARE", chance = 30 },
+        { name = "EPIC", chance = 120 },
+        { name = "LEGENDARY", chance = 500 },
+        { name = "MYTHIC", chance = 2500 },
+        { name = "DIVINE", chance = 12000 },
+        { name = "PRISMATIC", chance = 60000 },
+        { name = "TRANSCENDENT", chance = 300000 },
+        { name = "ETHEREAL", chance = 1500000 },
+        { name = "SECRET", chance = 8000000 },
+        { name = "CELESTIAL", chance = 40000000 },
+        { name = "LUNAR", chance = 200000000 },
+        { name = "IMMORTAL", chance = 1000000000 }
+    },
+    Cows = {
+        { name = "Bamboo", rarity = 1, chance = 2 },
+        { name = "Choco", rarity = 1, chance = 4 },
+        { name = "Ivy", rarity = 2, chance = 8 },
+        { name = "Mushy", rarity = 2, chance = 12 },
+        { name = "Camo", rarity = 2, chance = 18 },
+        { name = "Scriblo", rarity = 2, chance = 25 },
+        { name = "Reefy", rarity = 3, chance = 30 },
+        { name = "Minty", rarity = 3, chance = 45 },
+        { name = "Buzzly", rarity = 3, chance = 65 },
+        { name = "Moss", rarity = 3, chance = 100 },
+        { name = "Frosty", rarity = 4, chance = 120 },
+        { name = "Jackmoo", rarity = 4, chance = 180 },
+        { name = "Medic", rarity = 4, chance = 250 },
+        { name = "Citrush", rarity = 4, chance = 320 },
+        { name = "Poppy", rarity = 4, chance = 400 },
+        { name = "Voltmo", rarity = 5, chance = 500 },
+        { name = "Puffy", rarity = 5, chance = 900 },
+        { name = "Bloomsy", rarity = 5, chance = 2000 },
+        { name = "Solar", rarity = 10, chance = 13000000 },
+        { name = "Boo", rarity = 11, chance = 18000000 },
+        { name = "Chrono", rarity = 11, chance = 25000000 },
+        { name = "Nullix", rarity = 11, chance = 35000000 },
+        { name = "Hexie", rarity = 12, chance = 40000000 },
+        { name = "Parasite", rarity = 12, chance = 80000000 },
+        { name = "Sprazy", rarity = 12, chance = 150000000 },
+        { name = "Toy", rarity = 13, chance = 200000000 },
+        { name = "Ronin", rarity = 13, chance = 400000000 },
+        { name = "Xenmoo", rarity = 13, chance = 700000000 },
+        { name = "Diavox", rarity = 14, chance = 1000000000 },
+        { name = "Reaper", rarity = 14, chance = 2500000000 }
+    }
+}
+
+local function LocalRollCow(luck)
+    local luckVal = math.max(1, luck or 1)
+    local sortedCows = {}
+    for _, cow in ipairs(LocalCowData.Cows) do
+        table.insert(sortedCows, cow)
+    end
+    table.sort(sortedCows, function(a, b)
+        return (a.chance or 1) > (b.chance or 1)
+    end)
+    
+    for _, cow in ipairs(sortedCows) do
+        local chance = math.max(1, (cow.chance or 1) / luckVal)
+        if math.random() < 1 / chance then
+            return cow, LocalCowData.Rarities[cow.rarity] or LocalCowData.Rarities[1]
+        end
+    end
+    
+    local defaultCow = sortedCows[#sortedCows]
+    return defaultCow, LocalCowData.Rarities[defaultCow.rarity] or LocalCowData.Rarities[1]
+end
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -62,6 +138,7 @@ end
 -- ══════════════════════════════════════════════════════════
 local Config = {
     AutoHatch = false,
+    SpeedBypass = false,
     AutoSell = false,
     SellThreshold = 10, -- numeric: 1-20
     AutoMerchant = false,
@@ -165,6 +242,18 @@ MainTab:CreateToggle({
         if _G.__setAuto then
             pcall(function() _G.__setAuto(Value) end)
         end
+    end
+})
+
+MainTab:CreateToggle({
+    Name = "⚡ Speed Bypass",
+    Info = "Bypasses wait times for ultra-fast instant hatching!",
+    CurrentValue = Config.SpeedBypass,
+    SectionParent = HatchSection,
+    Flag = "SpeedBypass",
+    Callback = function(Value)
+        Config.SpeedBypass = Value
+        SaveConfig()
     end
 })
 
@@ -389,7 +478,7 @@ end)
 -- Auto Hatch: custom robust loop simulating local performRoll and firing AddCow:FireServer
 spawn(function()
     while true do
-        wait(0.1)
+        wait(0.05)
         if Config.AutoHatch then
             -- 1. Try built-in game auto-roll as a fallback (if in the same global context)
             local gameAutoActive = false
@@ -414,29 +503,72 @@ spawn(function()
                         luck = luck * State.LastData.NextRollLuckMul
                     end
                     
-                    -- Perform local roll computation
-                    local rolledCow, rarity = CowData.RollCow(luck)
+                    -- Perform local roll computation safely
+                    local rolledCow, rarity
+                    if hasCowData and CowData then
+                        rolledCow, rarity = CowData.RollCow(luck)
+                    else
+                        -- Failsafe local roll simulator
+                        rolledCow, rarity = LocalRollCow(luck)
+                    end
+                    
                     if rolledCow and rarity then
                         -- Determine rarity index
                         local rarityIndex = rolledCow.rarity or 1
-                        for idx, r in ipairs(CowData.Rarities) do
-                            if r == rarity then
-                                rarityIndex = idx
-                                break
+                        if hasCowData and CowData and CowData.Rarities then
+                            for idx, r in ipairs(CowData.Rarities) do
+                                if r == rarity then
+                                    rarityIndex = idx
+                                    break
+                                end
+                            end
+                        else
+                            for idx, r in ipairs(LocalCowData.Rarities) do
+                                if r == rarity then
+                                    rarityIndex = idx
+                                    break
+                                end
                             end
                         end
                         
                         -- Determine size & mutation variants
-                        local sizeObj = CowData.RollSize and CowData.RollSize(effects) or nil
-                        local mutObj = CowData.RollMutation and CowData.RollMutation(effects) or nil
+                        local sizeObj, mutObj
+                        if hasCowData and CowData then
+                            sizeObj = CowData.RollSize and CowData.RollSize(effects) or nil
+                            mutObj = CowData.RollMutation and CowData.RollMutation(effects) or nil
+                        else
+                            -- Fallback to standard percentages (huge=1%, big=10%, thunder=0.1%, hollow=0.2%, flaming=1%)
+                            if math.random() < 0.01 then
+                                sizeObj = { id = "huge" }
+                            elseif math.random() < 0.1 then
+                                sizeObj = { id = "big" }
+                            end
+                            
+                            local randMut = math.random()
+                            if randMut < 0.001 then
+                                mutObj = { id = "thunder" }
+                            elseif randMut < 0.003 then
+                                mutObj = { id = "hollow" }
+                            elseif randMut < 0.013 then
+                                mutObj = { id = "flaming" }
+                            end
+                        end
+                        
                         local sizeId = sizeObj and sizeObj.id or nil
                         local mutId = mutObj and mutObj.id or nil
                         
                         -- Apply forced next roll variant if set in save data
                         if State.LastData and State.LastData.NextRollForceVariant and State.LastData.NextRollForceVariant ~= "" then
                             local forceVariant = State.LastData.NextRollForceVariant
-                            local sizeCheck = CowData.GetSize and CowData.GetSize(forceVariant)
-                            local mutCheck = CowData.GetMutation and CowData.GetMutation(forceVariant)
+                            local sizeCheck, mutCheck
+                            if hasCowData and CowData then
+                                sizeCheck = CowData.GetSize and CowData.GetSize(forceVariant)
+                                mutCheck = CowData.GetMutation and CowData.GetMutation(forceVariant)
+                            else
+                                sizeCheck = (forceVariant == "huge" or forceVariant == "big") and { id = forceVariant } or nil
+                                mutCheck = (forceVariant == "thunder" or forceVariant == "hollow" or forceVariant == "flaming") and { id = forceVariant } or nil
+                            end
+                            
                             if sizeCheck then
                                 sizeId = forceVariant
                                 mutId = nil
@@ -456,11 +588,14 @@ spawn(function()
                         AddCow:FireServer(rolledCow.name, rarityIndex, variantStr)
                     end
                     
-                    -- Calculate dynamic wait interval based on roll speed effects
-                    local speedMul = effects.RollSpeedMul or 1
-                    local interval = 0.5 * speedMul
-                    if interval < 0.05 then
-                        interval = 0.05
+                    -- Calculate dynamic wait interval
+                    local interval = 0.01
+                    if not Config.SpeedBypass then
+                        local speedMul = effects.RollSpeedMul or 1
+                        interval = 0.5 * speedMul
+                        if interval < 0.05 then
+                            interval = 0.05
+                        end
                     end
                     wait(interval)
                 end)
@@ -547,8 +682,8 @@ spawn(function()
             end)
             
             if success and data and type(data) == "table" then
-                -- data from GetSkillTreeData has the player's unlocked skills and effects
-                local unlockedSkills = data.UnlockedSkills or {}
+                -- data from GetSkillTreeData has the player's unlocked skills dictionary at data.Unlocked
+                local unlockedSkills = data.Unlocked or {}
                 
                 -- Try to require the SkillTreeConfig to get node definitions
                 local configOk, SkillTreeConfig = pcall(function()
@@ -556,6 +691,10 @@ spawn(function()
                 end)
                 
                 if configOk and SkillTreeConfig and SkillTreeConfig.Nodes then
+                    -- Use latest money and rolls from returned data, falling back to State
+                    local currentMoney = data.Money or State.Money or 0
+                    local currentTotalRolls = data.TotalRolls or State.TotalRolls or 0
+                    
                     for _, node in ipairs(SkillTreeConfig.Nodes) do
                         if not unlockedSkills[node.id] then
                             -- Check prerequisites
@@ -572,10 +711,10 @@ spawn(function()
                             if canBuy and node.cost then
                                 -- Check if we can afford
                                 local canAfford = true
-                                if node.cost.Money and State.Money < node.cost.Money then
+                                if node.cost.Money and currentMoney < node.cost.Money then
                                     canAfford = false
                                 end
-                                if node.cost.TotalRolls and State.TotalRolls < node.cost.TotalRolls then
+                                if node.cost.TotalRolls and currentTotalRolls < node.cost.TotalRolls then
                                     canAfford = false
                                 end
                                 

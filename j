@@ -374,7 +374,6 @@ local Window = Rayfield:CreateWindow({
     ConfigurationSaving = {
         Enabled    = false,
     },
-    Discord   = { Enabled = false },
     KeySystem = false,
 })
 

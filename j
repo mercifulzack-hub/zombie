@@ -2,7 +2,7 @@ local Players        = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer    = Players.LocalPlayer
 
--- ─── Filesystem stubs ─────────────────────────────────────────────────────────
+-- Filesystem stubs
 if not isfolder  then isfolder  = function() return false end end
 if not makefolder then makefolder = function() end end
 if not isfile    then isfile    = function() return false end end
@@ -10,13 +10,40 @@ if not readfile  then readfile  = function() return "" end end
 if not writefile then writefile = function() end end
 if not delfile   then delfile   = function() end end
 
--- ─── Load Rayfield ────────────────────────────────────────────────────────────
-local Rayfield = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua",
-    true
-))()
+-- Load Rayfield
+local function notifyLoadError(message)
+    warn("[AnimeCardAuto] " .. tostring(message))
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "AnimeCardAuto",
+            Text = tostring(message),
+            Duration = 6,
+        })
+    end)
+end
 
--- ─── Remote Setup ─────────────────────────────────────────────────────────────
+local RAYFIELD_URL = "https://sirius.menu/rayfield"
+local rayfieldOk, rayfieldSource = pcall(function()
+    return game:HttpGet(RAYFIELD_URL)
+end)
+if not rayfieldOk or type(rayfieldSource) ~= "string" or #rayfieldSource < 100 then
+    notifyLoadError("Rayfield download failed. Check HTTP/executor access.")
+    return
+end
+
+local rayfieldChunk, rayfieldCompileErr = loadstring(rayfieldSource)
+if type(rayfieldChunk) ~= "function" then
+    notifyLoadError("Rayfield compile failed: " .. tostring(rayfieldCompileErr))
+    return
+end
+
+local rayfieldRunOk, Rayfield = pcall(rayfieldChunk)
+if not rayfieldRunOk or type(Rayfield) ~= "table" then
+    notifyLoadError("Rayfield startup failed: " .. tostring(Rayfield))
+    return
+end
+
+-- Remote Setup
 local RE  = ReplicatedStorage:WaitForChild("_RemoteEvents")
 local RF  = ReplicatedStorage:WaitForChild("_RemoteFunctions")
 
@@ -46,7 +73,7 @@ local RequestBossBattle     = RF:FindFirstChild("RequestBossBattle") or RF:WaitF
 local GetPlayerSettings     = RF:FindFirstChild("GetPlayerSettings") or RF:WaitForChild("GetPlayerSettings", 5)
 local TeleportEvent         = ReplicatedStorage:FindFirstChild("TeleportEvent")
 
--- ─── Card Data (inlined from CardData.lua) ────────────────────────────────────
+-- Card Data (inlined from CardData.lua)
 -- Maps cardId -> {Damage=n, HP=n, RarityNumber=n, Name=string}
 local CARD_DATA = {
     slime               = {Name="Skeleton",            Damage=6,    HP=12,    RarityNumber=1},
@@ -128,7 +155,7 @@ do
     end
 end
 
--- ─── State ────────────────────────────────────────────────────────────────────
+-- State
 local Cfg = {
     AutoRoll        = false,
     FastRoll        = false,
@@ -167,7 +194,7 @@ local State = {
     WorldEnemyCleared = {},
 }
 
--- ─── Helpers ──────────────────────────────────────────────────────────────────
+-- Helpers
 local _logThrottle = {}
 local function logEvery(key, msg, interval)
     local now = tick()
@@ -193,7 +220,7 @@ local function syncOwnedCards()
     return false
 end
 
--- ─── Best Deck Builder ────────────────────────────────────────────────────────
+-- Best Deck Builder
 -- Picks top 4 owned cards by mode: ATK = highest Damage, HP = highest HP, BALANCED = highest Damage+HP
 local function getBestDeck(mode)
     local owned = {}
@@ -391,21 +418,22 @@ local function equipBestDeck()
     end
 end
 
--- ─── Auto Roll ────────────────────────────────────────────────────────────────
+-- Auto Roll
 -- SetAutoRollState:FireServer(true) mirrors clicking the Auto toggle in-game
 task.spawn(function()
     while task.wait(1) do
-        if not Cfg.AutoRoll then continue end
-        local ok, err = pcall(function()
-            SetAutoRollState:FireServer(true)
-        end)
-        if not ok then
-            logEvery("autoroll_err", "SetAutoRollState error: " .. tostring(err), 10)
+        if Cfg.AutoRoll then
+            local ok, err = pcall(function()
+                SetAutoRollState:FireServer(true)
+            end)
+            if not ok then
+                logEvery("autoroll_err", "SetAutoRollState error: " .. tostring(err), 10)
+            end
         end
     end
 end)
 
--- ─── Auto Roll OFF when toggled off ──────────────────────────────────────────
+-- Auto Roll OFF when toggled off
 -- We track previous state to turn server-side auto-roll off cleanly
 local _prevAutoRoll = false
 task.spawn(function()
@@ -417,7 +445,7 @@ task.spawn(function()
     end
 end)
 
--- ─── Fast Roll toggle ────────────────────────────────────────────────────────
+-- Fast Roll toggle
 local _prevFastRoll = false
 task.spawn(function()
     while task.wait(0.5) do
@@ -428,7 +456,7 @@ task.spawn(function()
     end
 end)
 
--- ─── Auto Battle ─────────────────────────────────────────────────────────────
+-- Auto Battle
 -- DebugStartBattle:FireServer({cardIds}) confirmed in EnemyTeam/Frame/LocalScript.client.lua:119
 -- BattleEnd.OnClientEvent fires when battle ends - we restart after checking result.
 local teleportToBattleTarget
@@ -500,31 +528,32 @@ end
 
 task.spawn(function()
     while task.wait(2) do
-        if not Cfg.AutoBattle then continue end
-        if State.InBattle then
-            logEvery("battle_waiting", "In battle, waiting...", 10)
-            continue
-        end
-        local gap = tick() - State.LastBattleTime
-        if gap < 1.5 then task.wait(1.5 - gap) end
-        local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
-        local enemies = {}
-        local enemyId = chooseSmartEnemy(count)
-        for i = 1, count do
-            enemies[i] = enemyId
-        end
-        local tpOk, tpMsg = teleportToBattleTarget(enemyId, false)
-        if not tpOk then
-            logEvery("enemy_tp_missing", "Could not find live enemy model for " .. tostring(enemyId) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
-        end
-        local ok, err = pcall(function()
-            DebugStartBattle:FireServer(enemies)
-        end)
-        if ok then
-            State.InBattle = true
-            logEvery("battle_fired", "Auto Battle started vs " .. count .. "x " .. enemyId, 2)
-        else
-            logEvery("battle_err", "DebugStartBattle error: " .. tostring(err), 5)
+        if Cfg.AutoBattle then
+            if State.InBattle then
+                logEvery("battle_waiting", "In battle, waiting...", 10)
+            else
+                local gap = tick() - State.LastBattleTime
+                if gap < 1.5 then task.wait(1.5 - gap) end
+                local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
+                local enemies = {}
+                local enemyId = chooseSmartEnemy(count)
+                for i = 1, count do
+                    enemies[i] = enemyId
+                end
+                local tpOk, tpMsg = teleportToBattleTarget(enemyId, false)
+                if not tpOk then
+                    logEvery("enemy_tp_missing", "Could not find live enemy model for " .. tostring(enemyId) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
+                end
+                local ok, err = pcall(function()
+                    DebugStartBattle:FireServer(enemies)
+                end)
+                if ok then
+                    State.InBattle = true
+                    logEvery("battle_fired", "Auto Battle started vs " .. count .. "x " .. enemyId, 2)
+                else
+                    logEvery("battle_err", "DebugStartBattle error: " .. tostring(err), 5)
+                end
+            end
         end
     end
 end)
@@ -843,44 +872,44 @@ end
 
 task.spawn(function()
     while task.wait(3) do
-        if not Cfg.AutoBoss or Cfg.AutoWorldBosses then continue end
-        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
-            logEvery("boss_waiting", "Already in battle/raid, waiting...", 10)
-            continue
-        end
-        if tick() - State.LastBossTime < 8 then continue end
-        local ok, msg = startBossBattle(Cfg.BossId)
-        if ok then
-            logEvery("boss_started", "Boss battle requested: " .. tostring(Cfg.BossId), 2)
-        else
-            logEvery("boss_err", "Boss unavailable: " .. tostring(msg), 10)
-            State.LastBossTime = tick()
+        if Cfg.AutoBoss and not Cfg.AutoWorldBosses then
+            if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+                logEvery("boss_waiting", "Already in battle/raid, waiting...", 10)
+            elseif tick() - State.LastBossTime >= 8 then
+                local ok, msg = startBossBattle(Cfg.BossId)
+                if ok then
+                    logEvery("boss_started", "Boss battle requested: " .. tostring(Cfg.BossId), 2)
+                else
+                    logEvery("boss_err", "Boss unavailable: " .. tostring(msg), 10)
+                    State.LastBossTime = tick()
+                end
+            end
         end
     end
 end)
 
 task.spawn(function()
     while task.wait(4) do
-        if not Cfg.AutoWorldBosses then continue end
-        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
-            logEvery("world_waiting", "World boss progression waiting for current battle/raid...", 10)
-            continue
-        end
-        if tick() - State.LastBossTime < 8 then continue end
-        local stage = getNextWorldStage()
-        if not stage then
-            logEvery("world_done", "All known world stages are cleared/defeated", 30)
-            continue
-        end
-        if stage.BossId then
-            Cfg.BossId = stage.BossId
-        end
-        local ok, msg = startWorldStage(stage)
-        if ok then
-            logEvery("world_started", "World progression started " .. tostring(stage.Kind) .. ": " .. tostring(stage.Label or stage.BossId or stage.Key), 2)
-        else
-            logEvery("world_err", "World stage unavailable/failed to start: " .. tostring(stage.Label or stage.BossId or stage.Key) .. " -> " .. tostring(msg), 10)
-            State.LastBossTime = tick()
+        if Cfg.AutoWorldBosses then
+            if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+                logEvery("world_waiting", "World boss progression waiting for current battle/raid...", 10)
+            elseif tick() - State.LastBossTime >= 8 then
+                local stage = getNextWorldStage()
+                if not stage then
+                    logEvery("world_done", "All known world stages are cleared/defeated", 30)
+                else
+                    if stage.BossId then
+                        Cfg.BossId = stage.BossId
+                    end
+                    local ok, msg = startWorldStage(stage)
+                    if ok then
+                        logEvery("world_started", "World progression started " .. tostring(stage.Kind) .. ": " .. tostring(stage.Label or stage.BossId or stage.Key), 2)
+                    else
+                        logEvery("world_err", "World stage unavailable/failed to start: " .. tostring(stage.Label or stage.BossId or stage.Key) .. " -> " .. tostring(msg), 10)
+                        State.LastBossTime = tick()
+                    end
+                end
+            end
         end
     end
 end)
@@ -925,57 +954,57 @@ end
 
 task.spawn(function()
     while task.wait(4) do
-        if not Cfg.AutoRaid then continue end
-        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
-            logEvery("raid_waiting", "Already in battle/raid, waiting...", 10)
-            continue
-        end
-        if State.InRaidParty then
-            if tick() - State.LastRaidTime > 60 then
-                State.InRaidParty = false
-                logEvery("raid_watchdog", "Raid party did not start; retrying create path", 10)
-                continue
+        if Cfg.AutoRaid then
+            if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+                logEvery("raid_waiting", "Already in battle/raid, waiting...", 10)
+            elseif State.InRaidParty then
+                if tick() - State.LastRaidTime > 60 then
+                    State.InRaidParty = false
+                    logEvery("raid_watchdog", "Raid party did not start; retrying create path", 10)
+                else
+                    pcall(function() RaidPartyReady:FireServer(true) end)
+                end
+            elseif tick() - State.LastRaidTime >= 12 then
+                local ok, msg = createRaid()
+                if ok then
+                    logEvery("raid_created", "Raid party created: " .. tostring(Cfg.RaidDifficulty), 3)
+                else
+                    logEvery("raid_err", "Raid unavailable: " .. tostring(msg), 10)
+                    State.LastRaidTime = tick()
+                end
             end
-            pcall(function() RaidPartyReady:FireServer(true) end)
-            continue
-        end
-        if tick() - State.LastRaidTime < 12 then continue end
-        local ok, msg = createRaid()
-        if ok then
-            logEvery("raid_created", "Raid party created: " .. tostring(Cfg.RaidDifficulty), 3)
-        else
-            logEvery("raid_err", "Raid unavailable: " .. tostring(msg), 10)
-            State.LastRaidTime = tick()
         end
     end
 end)
 
--- ─── Auto Claim Quests ────────────────────────────────────────────────────────
+-- Auto Claim Quests
 -- ClaimAllQuestsReward:FireServer() confirmed in QuestController.client.lua:1057
 task.spawn(function()
     while task.wait(15) do
-        if not Cfg.AutoClaimQuests then continue end
-        local ok, err = pcall(function()
-            ClaimAllQuestsReward:FireServer()
-        end)
-        if ok then
-            logEvery("quest_claim", "Auto Claim Quests fired", 15)
-        else
-            logEvery("quest_claim_err", "ClaimAllQuestsReward error: " .. tostring(err), 10)
+        if Cfg.AutoClaimQuests then
+            local ok, err = pcall(function()
+                ClaimAllQuestsReward:FireServer()
+            end)
+            if ok then
+                logEvery("quest_claim", "Auto Claim Quests fired", 15)
+            else
+                logEvery("quest_claim_err", "ClaimAllQuestsReward error: " .. tostring(err), 10)
+            end
         end
     end
 end)
 
--- ─── Auto Equip Best Deck ─────────────────────────────────────────────────────
+-- Auto Equip Best Deck
 -- RequestEquipCard / RequestUnequipCard confirmed in DeckFrameController.client.lua:80-99
 task.spawn(function()
     while task.wait(8) do
-        if not Cfg.AutoEquipBest then continue end
-        equipBestDeck()
+        if Cfg.AutoEquipBest then
+            equipBestDeck()
+        end
     end
 end)
 
--- ─── Rayfield UI ─────────────────────────────────────────────────────────────
+-- Rayfield UI
 local Window = Rayfield:CreateWindow({
     Name            = "Anime Card Crusade Auto",
     LoadingTitle    = "Anime Card Auto",
@@ -985,7 +1014,7 @@ local Window = Rayfield:CreateWindow({
     KeySystem       = false,
 })
 
--- ══ Tab: Roll ═══════════════════════════════════════════════════════════════
+-- Tab: Roll
 local RollTab = Window:CreateTab("Roll")
 
 RollTab:CreateSection("Auto Roll", false)
@@ -1031,7 +1060,7 @@ RollTab:CreateButton({
     end,
 })
 
--- ══ Tab: Battle ══════════════════════════════════════════════════════════════
+-- Tab: Battle
 local BattleTab = Window:CreateTab("Battle")
 
 BattleTab:CreateSection("Auto Battle", false)
@@ -1267,7 +1296,7 @@ RaidTab:CreateButton({
     end,
 })
 
--- ══ Tab: Deck ════════════════════════════════════════════════════════════════
+-- Tab: Deck
 local DeckTab = Window:CreateTab("Deck")
 
 DeckTab:CreateSection("Auto Equip Best Deck", false)
@@ -1325,7 +1354,7 @@ DeckTab:CreateButton({
     end,
 })
 
--- ══ Tab: Quests ══════════════════════════════════════════════════════════════
+-- Tab: Quests
 local QuestTab = Window:CreateTab("Quests")
 
 QuestTab:CreateSection("Auto Claim", false)
@@ -1348,7 +1377,7 @@ QuestTab:CreateButton({
     end,
 })
 
--- ══ Tab: Inventory ═══════════════════════════════════════════════════════════
+-- Tab: Inventory
 local InvTab = Window:CreateTab("Inventory")
 
 InvTab:CreateSection("Items", false)
@@ -1382,7 +1411,7 @@ InvTab:CreateButton({
     end,
 })
 
--- ══ Tab: Settings ═════════════════════════════════════════════════════════════
+-- Tab: Settings
 local SetTab = Window:CreateTab("Settings")
 
 SetTab:CreateSection("Status", false)

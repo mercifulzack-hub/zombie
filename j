@@ -16,6 +16,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 
+local CowData = require(ReplicatedStorage:WaitForChild("CowData"))
+
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -152,14 +154,14 @@ local HatchSection = MainTab:CreateSection("Hatching", false)
 
 MainTab:CreateToggle({
     Name = "🥚 Auto Hatch",
-    Info = "Uses the game's built-in auto-roll toggle. Requires Auto Hatch skill unlocked.",
+    Info = "Uses high-speed instant hatching. Failsafe roller bypasses executor restrictions and skill tree requirements!",
     CurrentValue = Config.AutoHatch,
     SectionParent = HatchSection,
     Flag = "AutoHatch",
     Callback = function(Value)
         Config.AutoHatch = Value
         SaveConfig()
-        -- Use the game's actual auto-roll function
+        -- Fallback built-in toggling
         if _G.__setAuto then
             pcall(function() _G.__setAuto(Value) end)
         end
@@ -384,18 +386,90 @@ spawn(function()
     end
 end)
 
--- Auto Hatch: keep the game's auto-roll toggled on
+-- Auto Hatch: custom robust loop simulating local performRoll and firing AddCow:FireServer
 spawn(function()
     while true do
-        wait(3)
+        wait(0.1)
         if Config.AutoHatch then
-            -- Wait for the game to expose __setAuto (requires AutoRoll skill)
-            if _G.__setAuto then
-                -- Check if auto is already on
-                local autoOn = _G.__autoOn and _G.__autoOn()
-                if not autoOn then
-                    pcall(function() _G.__setAuto(true) end)
+            -- 1. Try built-in game auto-roll as a fallback (if in the same global context)
+            local gameAutoActive = false
+            if _G.__setAuto and _G.__autoOn then
+                pcall(function()
+                    if not _G.__autoOn() then
+                        _G.__setAuto(true)
+                    end
+                    gameAutoActive = true
+                end)
+            end
+            
+            -- 2. Robust Custom Failsafe / Fast Roller:
+            -- Bypasses executor-sandboxed _G sandbox limitations and skill tree gates
+            if not gameAutoActive then
+                local success = pcall(function()
+                    local effects = State.Effects or {}
+                    local luck = (1 + (effects.LuckBonus or (effects.Luck or 0))) * (effects.LuckMul or 1)
+                    
+                    -- Check for NextRollLuckMul from save data
+                    if State.LastData and State.LastData.NextRollLuckMul and State.LastData.NextRollLuckMul > 1 then
+                        luck = luck * State.LastData.NextRollLuckMul
+                    end
+                    
+                    -- Perform local roll computation
+                    local rolledCow, rarity = CowData.RollCow(luck)
+                    if rolledCow and rarity then
+                        -- Determine rarity index
+                        local rarityIndex = rolledCow.rarity or 1
+                        for idx, r in ipairs(CowData.Rarities) do
+                            if r == rarity then
+                                rarityIndex = idx
+                                break
+                            end
+                        end
+                        
+                        -- Determine size & mutation variants
+                        local sizeObj = CowData.RollSize and CowData.RollSize(effects) or nil
+                        local mutObj = CowData.RollMutation and CowData.RollMutation(effects) or nil
+                        local sizeId = sizeObj and sizeObj.id or nil
+                        local mutId = mutObj and mutObj.id or nil
+                        
+                        -- Apply forced next roll variant if set in save data
+                        if State.LastData and State.LastData.NextRollForceVariant and State.LastData.NextRollForceVariant ~= "" then
+                            local forceVariant = State.LastData.NextRollForceVariant
+                            local sizeCheck = CowData.GetSize and CowData.GetSize(forceVariant)
+                            local mutCheck = CowData.GetMutation and CowData.GetMutation(forceVariant)
+                            if sizeCheck then
+                                sizeId = forceVariant
+                                mutId = nil
+                            elseif mutCheck then
+                                sizeId = nil
+                                mutId = forceVariant
+                            end
+                        end
+                        
+                        -- Build variant string
+                        local variantStr = nil
+                        if sizeId or mutId then
+                            variantStr = (sizeId or "normal") .. "_" .. (mutId or "normal")
+                        end
+                        
+                        -- Fire the RemoteEvent directly to credit the cow to the server
+                        AddCow:FireServer(rolledCow.name, rarityIndex, variantStr)
+                    end
+                    
+                    -- Calculate dynamic wait interval based on roll speed effects
+                    local speedMul = effects.RollSpeedMul or 1
+                    local interval = 0.5 * speedMul
+                    if interval < 0.05 then
+                        interval = 0.05
+                    end
+                    wait(interval)
+                end)
+                
+                if not success then
+                    wait(1) -- Fallback wait on error
                 end
+            else
+                wait(1)
             end
         end
     end

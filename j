@@ -1,751 +1,456 @@
 --[[
-    Hatch Cows Fully Automated Script
-    Features:
-    - Auto Hatch/Roll (uses game's built-in _G.__setAuto)
-    - Auto Sell Milk (with price thresholds)
-    - Auto Buy from Merchant (CheesePack / TicketPack)
-    - Auto Skill Tree Upgrades (smart priority)
-    - Auto Equip Best Cows
-    - Auto Rebirth (when affordable)
-    - Anti-AFK
-    - Uses Rayfield/Arrayfield UI Library
+    Hatch Cows Auto - Full Script
+    UI: Rayfield (CustomFIeld fork) | No key system
+    All remotes verified from game source code.
+
+    Exploitable remotes confirmed:
+      AddCow(name, rarityIdx, variant?)  - fires any cow into inventory
+      SellMilk()                        - sells all milk
+      MerchantBuy(item)                 - buys CheesePack / TicketPack
+      PurchaseSkill(id)                 - buys skill tree node
+      Rebirth()                         - performs rebirth
+      SetSettings(key, value)           - changes server settings
+      FuseStart(cow1, cow2)             - starts a fuse
+      FuseClaim()                       - claims fuse result
+      UseItem(id)                       - uses an item
+      ClaimOffline()                    - claims offline earnings
+      SyncEquipped(table)               - syncs equipped cow list
 ]]
 
-local Players = game:GetService("Players")
+local Players        = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
+local LocalPlayer    = Players.LocalPlayer
+local PlayerGui      = LocalPlayer:WaitForChild("PlayerGui")
 
-local CowData = require(ReplicatedStorage:WaitForChild("CowData"))
+-- ─── Load Rayfield ────────────────────────────────────────────────────────────
+local Rayfield = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua"
+))()
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+-- ─── Verified Remote Events ───────────────────────────────────────────────────
+local Shared         = ReplicatedStorage:WaitForChild("Shared")
+local Events         = Shared:WaitForChild("Events")
 
--- ══════════════════════════════════════════════════════════
--- EVENTS (actual paths from game place files)
--- ══════════════════════════════════════════════════════════
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Events = Shared:WaitForChild("Events")
-
-local AddCow = Events:WaitForChild("AddCow")
-local SellMilk = Events:WaitForChild("SellMilk")
-local GetMilkPrice = Events:WaitForChild("GetMilkPrice")
-local MerchantBuy = Events:WaitForChild("MerchantBuy")
-local PurchaseSkill = Events:WaitForChild("PurchaseSkill")
+local DataUpdate     = Events:WaitForChild("DataUpdate")
+local AddCow         = Events:WaitForChild("AddCow")
+local SellMilk       = Events:WaitForChild("SellMilk")
+local GetMilkPrice   = Events:WaitForChild("GetMilkPrice")
+local MerchantBuy    = Events:WaitForChild("MerchantBuy")
+local PurchaseSkill  = Events:WaitForChild("PurchaseSkill")
 local GetSkillTreeData = Events:WaitForChild("GetSkillTreeData")
-local DataUpdate = Events:WaitForChild("DataUpdate")
-local SyncEquipped = Events:WaitForChild("SyncEquipped")
-local Rebirth = Events:WaitForChild("Rebirth")
+local SyncEquipped   = Events:WaitForChild("SyncEquipped")
+local Rebirth        = Events:WaitForChild("Rebirth")
 local GetRebirthInfo = Events:WaitForChild("GetRebirthInfo")
+local SetSettings    = Events:WaitForChild("SetSettings")
+local FuseStart      = Events:WaitForChild("FuseStart")
+local FuseClaim      = Events:WaitForChild("FuseClaim")
+local UseItem        = Events:WaitForChild("UseItem")
+local ClaimOffline   = Events:WaitForChild("ClaimOffline")
 
--- ══════════════════════════════════════════════════════════
--- UI REFERENCES (actual names from CowController)
--- ══════════════════════════════════════════════════════════
+-- ─── Game Config ──────────────────────────────────────────────────────────────
+local SkillTreeConfig = require(Shared.Config.SkillTreeConfig)
 local CowSimulatorGui = PlayerGui:WaitForChild("CowSimulatorGui")
-local BackpackPanelNEW = CowSimulatorGui:WaitForChild("BackpackPanelNEW")
-local EquipBest = BackpackPanelNEW:FindFirstChild("EquipBest")
 
--- Silent and robust helper to trigger EquipBest click handler
-local function TriggerEquipBest()
-    if not EquipBest then return end
-    pcall(function()
-        if firesignal then
-            firesignal(EquipBest.MouseButton1Click)
-        else
-            EquipBest.MouseButton1Click:Fire()
-        end
-    end)
-end
-
--- ══════════════════════════════════════════════════════════
--- CONFIG
--- ══════════════════════════════════════════════════════════
-local Config = {
-    AutoHatch = false,
-    SpeedBypass = false,
-    AutoSell = false,
-    SellThreshold = 10, -- numeric: 1-20
-    AutoMerchant = false,
-    MerchantItem = "CheesePack", -- CheesePack, TicketPack, Both
-    AutoUpgrades = false,
-    UpgradeMode = "Smart", -- Smart, All
-    AutoEquipBest = false,
-    AutoRebirth = false,
-    AntiAFK = true,
-    AutoSellInterval = 30,
-    RebirthCheckInterval = 10
+-- All cow names + rarity index from CowData.lua (verified)
+-- Format: { name, rarityIndex }
+local ALL_COWS = {
+    {"Bamboo",1},{"Choco",1},{"Ivy",2},{"Mushy",2},{"Camo",2},{"Scriblo",2},
+    {"Reefy",3},{"Minty",3},{"Buzzly",3},{"Moss",3},{"Frosty",4},{"Jackmoo",4},
+    {"Medic",4},{"Citrush",4},{"Poppy",4},{"Voltmo",5},{"Puffy",5},{"Bloomsy",5},
+    {"Voltix",6},{"Sweeto",6},{"Sakury",6},{"Obsy",6},{"Arcanox",7},{"Bugzo",7},
+    {"Hexmoo",7},{"Voidor",8},{"Splashy",8},{"Mecha",8},{"Magmoo",8},{"Jelly",8},
+    {"Grimoo",8},{"Glowbyte",9},{"Hornox",9},{"Toxsy",9},{"Corruptor",9},
+    {"Bloodfang",10},{"Dracox",10},{"Matrix",10},{"Vexoo",10},{"Wake",11},
+    {"Solar",11},{"Boo",11},{"Chrono",11},{"Nullix",11},{"Hexie",12},
+    {"Parasite",12},{"Sprazy",12},{"Toy",13},{"Ronin",13},{"Xenmoo",13},
+    {"Diavox",14},{"Reaper",14},
 }
 
--- ══════════════════════════════════════════════════════════
--- STATE (matches actual DataUpdate payload fields)
--- ══════════════════════════════════════════════════════════
+-- Build name-only list for dropdown
+local COW_NAMES = {}
+for _, v in ipairs(ALL_COWS) do
+    table.insert(COW_NAMES, v[1])
+end
+
+-- Build lookup: name -> rarityIndex
+local COW_RARITY = {}
+for _, v in ipairs(ALL_COWS) do
+    COW_RARITY[v[1]] = v[2]
+end
+
+-- Priority skill branches for smart upgrades (from SkillTreeConfig.lua)
+local PRIORITY_BRANCHES = { Luck=true, SuperLuck=true, Speed=true, Milk=true }
+
+-- ─── State ────────────────────────────────────────────────────────────────────
 local State = {
-    CurrentMilkPrice = 1, -- numeric price (1-20)
-    NextPriceChangeTime = 0, -- os.time() based
-    LastData = nil, -- full DataUpdate payload
-    Money = 0,
-    Milk = 0,
-    TotalRolls = 0,
-    Backpack = {},
-    Equipped = {},
-    Effects = {},
-    Merchant = nil, -- {CheesePack=N, TicketPack=N, RestockAt=T}
-    LastAction = tick()
+    Money        = 0,
+    Milk         = 0,
+    Rolls        = 0,
+    MilkPrice    = 1,
+    MerchantData = nil,
+    LastActivity = tick(),
 }
 
--- Sell threshold name → numeric value mapping
-local PriceThresholdNames = {
-    Low = 5,
-    Average = 10,
-    Good = 15,
-    Insane = 18
+-- ─── Config Flags ─────────────────────────────────────────────────────────────
+local Cfg = {
+    AutoHatch      = false,
+    AutoSell       = false,
+    SellThreshold  = 10,
+    AutoMerchant   = false,
+    MerchantItem   = "CheesePack",
+    AutoUpgrades   = false,
+    SmartUpgrades  = true,
+    AutoEquipBest  = false,
+    AutoRebirth    = false,
+    AntiAFK        = false,
+    -- Spawn cow settings
+    SelectedCow    = "Reaper",
 }
 
--- ══════════════════════════════════════════════════════════
--- CONFIG SAVE / LOAD
--- ══════════════════════════════════════════════════════════
-local function SaveConfig()
-    pcall(function()
-        writefile("HatchCowsAuto_Config.json", HttpService:JSONEncode(Config))
-    end)
-end
-
-local function LoadConfig()
-    if not isfile or not isfile("HatchCowsAuto_Config.json") then return end
-    pcall(function()
-        local decoded = HttpService:JSONDecode(readfile("HatchCowsAuto_Config.json"))
-        if decoded then
-            for k, v in pairs(decoded) do
-                if Config[k] ~= nil then
-                    Config[k] = v
-                end
-            end
-        end
-    end)
-end
-
--- ══════════════════════════════════════════════════════════
--- RAYFIELD UI SETUP (no key system as requested)
--- ══════════════════════════════════════════════════════════
-local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/UI-Interface/CustomField/main/RayField.lua'))()
-
-local Window = Rayfield:CreateWindow({
-    Name = "🐄 Hatch Cows Auto",
-    LoadingTitle = "Hatch Cows Auto",
-    LoadingSubtitle = "by HatchCowsAuto",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = nil,
-        FileName = "HatchCowsAuto_Rayfield"
-    },
-    Discord = {
-        Enabled = false,
-        Invite = "",
-        RememberJoins = true
-    },
-    KeySystem = false
-})
-
--- ═══════════════ TAB: Main Features ═══════════════
-local MainTab = Window:CreateTab("Main Features", 4483362458)
-local StatusTab = Window:CreateTab("Status")
-
--- ═══════════════ SECTION: Auto Hatch ═══════════════
-local HatchSection = MainTab:CreateSection("Hatching", false)
-
-MainTab:CreateToggle({
-    Name = "🥚 Auto Hatch",
-    Info = "Uses high-speed instant hatching. Failsafe roller bypasses executor restrictions and skill tree requirements!",
-    CurrentValue = Config.AutoHatch,
-    SectionParent = HatchSection,
-    Flag = "AutoHatch",
-    Callback = function(Value)
-        Config.AutoHatch = Value
-        SaveConfig()
-        -- Fallback built-in toggling
-        if _G.__setAuto then
-            pcall(function() _G.__setAuto(Value) end)
-        end
-    end
-})
-
-MainTab:CreateToggle({
-    Name = "⚡ Speed Bypass",
-    Info = "Bypasses wait times for ultra-fast instant hatching!",
-    CurrentValue = Config.SpeedBypass,
-    SectionParent = HatchSection,
-    Flag = "SpeedBypass",
-    Callback = function(Value)
-        Config.SpeedBypass = Value
-        SaveConfig()
-    end
-})
-
--- ═══════════════ SECTION: Selling ═══════════════
-local SellSection = MainTab:CreateSection("Milk Selling", false)
-
-MainTab:CreateToggle({
-    Name = "💰 Auto Sell Milk",
-    Info = "Sells all milk when price meets your threshold.",
-    CurrentValue = Config.AutoSell,
-    SectionParent = SellSection,
-    Flag = "AutoSell",
-    Callback = function(Value)
-        Config.AutoSell = Value
-        SaveConfig()
-    end
-})
-
-MainTab:CreateDropdown({
-    Name = "Sell Threshold",
-    Options = {"Low (5+)", "Average (10+)", "Good (15+)", "Insane (18+)"},
-    CurrentOption = "Average (10+)",
-    MultiSelection = false,
-    SectionParent = SellSection,
-    Flag = "SellThreshold",
-    Callback = function(Option)
-        if type(Option) == "table" then Option = Option[1] end
-        local val = Option:match("(%d+)")
-        Config.SellThreshold = tonumber(val) or 10
-        SaveConfig()
-    end
-})
-
-MainTab:CreateSlider({
-    Name = "Sell Check Interval",
-    Info = "Seconds between sell checks.",
-    Range = {5, 120},
-    Increment = 5,
-    Suffix = "sec",
-    CurrentValue = Config.AutoSellInterval,
-    SectionParent = SellSection,
-    Flag = "SellInterval",
-    Callback = function(Value)
-        Config.AutoSellInterval = Value
-        SaveConfig()
-    end
-})
-
--- ═══════════════ SECTION: Merchant ═══════════════
-local MerchantSection = MainTab:CreateSection("Merchant", false)
-
-MainTab:CreateToggle({
-    Name = "🛒 Auto Buy Merchant",
-    Info = "Auto-buys from the Traveling Merchant when stock is available.",
-    CurrentValue = Config.AutoMerchant,
-    SectionParent = MerchantSection,
-    Flag = "AutoMerchant",
-    Callback = function(Value)
-        Config.AutoMerchant = Value
-        SaveConfig()
-    end
-})
-
-MainTab:CreateDropdown({
-    Name = "Merchant Item",
-    Options = {"CheesePack", "TicketPack", "Both"},
-    CurrentOption = Config.MerchantItem,
-    MultiSelection = false,
-    SectionParent = MerchantSection,
-    Flag = "MerchantItem",
-    Callback = function(Option)
-        if type(Option) == "table" then Option = Option[1] end
-        Config.MerchantItem = Option
-        SaveConfig()
-    end
-})
-
--- ═══════════════ SECTION: Upgrades & Progression ═══════════════
-local ProgressSection = MainTab:CreateSection("Progression", false)
-
-MainTab:CreateToggle({
-    Name = "⬆️ Auto Upgrades",
-    Info = "Automatically purchases skill tree nodes.",
-    CurrentValue = Config.AutoUpgrades,
-    SectionParent = ProgressSection,
-    Flag = "AutoUpgrades",
-    Callback = function(Value)
-        Config.AutoUpgrades = Value
-        SaveConfig()
-    end
-})
-
-MainTab:CreateDropdown({
-    Name = "Upgrade Mode",
-    Options = {"Smart", "All"},
-    CurrentOption = Config.UpgradeMode,
-    MultiSelection = false,
-    SectionParent = ProgressSection,
-    Flag = "UpgradeMode",
-    Callback = function(Option)
-        if type(Option) == "table" then Option = Option[1] end
-        Config.UpgradeMode = Option
-        SaveConfig()
-    end
-})
-
-MainTab:CreateToggle({
-    Name = "⭐ Auto Equip Best",
-    Info = "Clicks the EquipBest button in the backpack periodically.",
-    CurrentValue = Config.AutoEquipBest,
-    SectionParent = ProgressSection,
-    Flag = "AutoEquipBest",
-    Callback = function(Value)
-        Config.AutoEquipBest = Value
-        SaveConfig()
-    end
-})
-
-MainTab:CreateToggle({
-    Name = "🔄 Auto Rebirth",
-    Info = "Automatically rebirths when you can afford it (money + cheese).",
-    CurrentValue = Config.AutoRebirth,
-    SectionParent = ProgressSection,
-    Flag = "AutoRebirth",
-    Callback = function(Value)
-        Config.AutoRebirth = Value
-        SaveConfig()
-    end
-})
-
--- ═══════════════ SECTION: Utility ═══════════════
-local UtilSection = MainTab:CreateSection("Utility", false)
-
-MainTab:CreateToggle({
-    Name = "🛡️ Anti-AFK",
-    Info = "Prevents being kicked for inactivity.",
-    CurrentValue = Config.AntiAFK,
-    SectionParent = UtilSection,
-    Flag = "AntiAFK",
-    Callback = function(Value)
-        Config.AntiAFK = Value
-        SaveConfig()
-    end
-})
-
--- ═══════════════ STATUS TAB ═══════════════
-local StatusSection = StatusTab:CreateSection("Live Stats", false)
-
-local MoneyLabel = StatusTab:CreateLabel("Money: 0", StatusSection)
-local MilkLabel = StatusTab:CreateLabel("Milk: 0", StatusSection)
-local RollsLabel = StatusTab:CreateLabel("Total Rolls: 0", StatusSection)
-local PriceLabel = StatusTab:CreateLabel("Milk Price: 1$/unit", StatusSection)
-local MerchantLabel = StatusTab:CreateLabel("Merchant: N/A", StatusSection)
-
--- ══════════════════════════════════════════════════════════
--- DATA TRACKING (listens to the actual DataUpdate event)
--- ══════════════════════════════════════════════════════════
+-- ─── Data Tracking ────────────────────────────────────────────────────────────
 DataUpdate.OnClientEvent:Connect(function(data)
     if type(data) ~= "table" then return end
-    
-    State.LastData = data
-    
-    -- Money (actual field from DataTemplate)
-    if type(data.Money) == "number" then
-        State.Money = data.Money
-    end
-    
-    -- Milk
-    if type(data.Milk) == "number" then
-        State.Milk = data.Milk
-    end
-    
-    -- TotalRolls
-    if type(data.TotalRolls) == "number" then
-        State.TotalRolls = data.TotalRolls
-    end
-    
-    -- Backpack (table of cow entries keyed by variant string)
-    if type(data.Backpack) == "table" then
-        State.Backpack = data.Backpack
-    end
-    
-    -- Equipped (array of cow key strings)
-    if type(data.Equipped) == "table" then
-        State.Equipped = data.Equipped
-    end
-    
-    -- Effects (skill tree computed effects)
-    if type(data.Effects) == "table" then
-        State.Effects = data.Effects
-    end
-    
-    -- Merchant stock (from DataUpdate payload)
-    if type(data.Merchant) == "table" then
-        State.Merchant = data.Merchant
-    end
+    if data.Money      ~= nil then State.Money        = data.Money end
+    if data.Milk       ~= nil then State.Milk         = data.Milk  end
+    if data.TotalRolls ~= nil then State.Rolls        = data.TotalRolls end
+    if data.Merchant   ~= nil then State.MerchantData = data.Merchant end
+    State.LastActivity = tick()
 end)
 
--- ══════════════════════════════════════════════════════════
--- AUTO FEATURES
--- ══════════════════════════════════════════════════════════
-
--- Anti-AFK: simple humanoid move
-spawn(function()
-    while true do
-        wait(60)
-        if Config.AntiAFK then
-            if tick() - State.LastAction > 300 then
-                local char = LocalPlayer.Character
-                if char then
-                    local hum = char:FindFirstChild("Humanoid")
-                    if hum then
-                        hum:Move(Vector3.new(0, 0, 0), true)
-                    end
-                end
-                State.LastAction = tick()
+-- ─── Auto Hatch ───────────────────────────────────────────────────────────────
+-- Uses game's _G.__setAuto (CowController.client.lua:1337)
+task.spawn(function()
+    while task.wait(0.5) do
+        if not Cfg.AutoHatch then continue end
+        if _G.__setAuto then
+            if _G.__autoOn and not _G.__autoOn() then
+                pcall(_G.__setAuto, true)
             end
         end
     end
 end)
 
--- Auto Hatch: custom robust loop simulating local performRoll and firing AddCow:FireServer
-spawn(function()
-    while true do
-        wait(0.05)
-        if Config.AutoHatch then
-            -- 1. Try built-in game auto-roll as a fallback (if in the same global context)
-            local gameAutoActive = false
-            if _G.__setAuto and _G.__autoOn then
-                pcall(function()
-                    if not _G.__autoOn() then
-                        _G.__setAuto(true)
-                    end
-                    gameAutoActive = true
-                end)
-            end
-            
-            -- 2. Fast Roller using native CowData
-            if not gameAutoActive then
-                local success = pcall(function()
-                    local effects = State.Effects or {}
-                    local luck = (1 + (effects.LuckBonus or (effects.Luck or 0))) * (effects.LuckMul or 1)
-                    
-                    -- Check for NextRollLuckMul from save data
-                    if State.LastData and State.LastData.NextRollLuckMul and State.LastData.NextRollLuckMul > 1 then
-                        luck = luck * State.LastData.NextRollLuckMul
-                    end
-                    
-                    -- Perform local roll computation safely
-                    local rolledCow, rarity = CowData.RollCow(luck)
-                    
-                    if rolledCow and rarity then
-                        -- Determine rarity index
-                        local rarityIndex = rolledCow.rarity or 1
-                        for idx, r in ipairs(CowData.Rarities) do
-                            if r == rarity then
-                                rarityIndex = idx
-                                break
-                            end
-                        end
-                        
-                        -- Determine size & mutation variants
-                        local sizeObj = CowData.RollSize and CowData.RollSize(effects) or nil
-                        local mutObj = CowData.RollMutation and CowData.RollMutation(effects) or nil
-                        local sizeId = sizeObj and sizeObj.id or nil
-                        local mutId = mutObj and mutObj.id or nil
-                        
-                        -- Apply forced next roll variant if set in save data
-                        if State.LastData and State.LastData.NextRollForceVariant and State.LastData.NextRollForceVariant ~= "" then
-                            local forceVariant = State.LastData.NextRollForceVariant
-                            local sizeCheck = CowData.GetSize and CowData.GetSize(forceVariant)
-                            local mutCheck = CowData.GetMutation and CowData.GetMutation(forceVariant)
-                            
-                            if sizeCheck then
-                                sizeId = forceVariant
-                                mutId = nil
-                            elseif mutCheck then
-                                sizeId = nil
-                                mutId = forceVariant
-                            end
-                        end
-                        
-                        -- Build variant string
-                        local variantStr = nil
-                        if sizeId or mutId then
-                            variantStr = (sizeId or "normal") .. "_" .. (mutId or "normal")
-                        end
-                        
-                        -- Fire the RemoteEvent directly to credit the cow to the server
-                        AddCow:FireServer(rolledCow.name, rarityIndex, variantStr)
-                    end
-                    
-                    -- Calculate dynamic wait interval
-                    local interval = 0.01
-                    if not Config.SpeedBypass then
-                        local speedMul = effects.RollSpeedMul or 1
-                        interval = 0.5 * speedMul
-                        if interval < 0.05 then
-                            interval = 0.05
-                        end
-                    end
-                    wait(interval)
-                end)
-                
-                if not success then
-                    wait(1) -- Fallback wait on error
-                end
-            else
-                wait(1)
-            end
-        end
-    end
-end)
-
--- Auto Sell Milk
-spawn(function()
-    while true do
-        wait(Config.AutoSellInterval)
-        if Config.AutoSell then
-            local threshold = Config.SellThreshold
-            if type(threshold) == "string" then
-                threshold = PriceThresholdNames[threshold] or 10
-            end
-            
-            if State.CurrentMilkPrice >= threshold and State.Milk > 0 then
-                pcall(function()
-                    SellMilk:FireServer()
-                end)
-            end
-        end
-    end
-end)
-
--- Update Milk Price (GetMilkPrice returns a TABLE: {price=N, nextRepickTime=T})
-spawn(function()
-    while true do
-        wait(15)
+-- ─── Auto Sell Milk ───────────────────────────────────────────────────────────
+-- SellMilk:FireServer() (ShopUI.lua:532,558) | GetMilkPrice:InvokeServer() (ShopUI.lua:354)
+task.spawn(function()
+    while task.wait(15) do
+        if not Cfg.AutoSell then continue end
         pcall(function()
-            local result = GetMilkPrice:InvokeServer()
-            if result and type(result) == "table" then
-                State.CurrentMilkPrice = result.price or 1
-                State.NextPriceChangeTime = result.nextRepickTime or 0
-            elseif type(result) == "number" then
-                -- Fallback if it ever returns just a number
-                State.CurrentMilkPrice = result
-            end
+            local price = GetMilkPrice:InvokeServer()
+            if price then State.MilkPrice = price end
         end)
-    end
-end)
-
--- Auto Merchant
-spawn(function()
-    while true do
-        wait(5)
-        if Config.AutoMerchant and State.Merchant then
-            local merchant = State.Merchant
-            
-            if Config.MerchantItem == "CheesePack" or Config.MerchantItem == "Both" then
-                if (merchant.CheesePack or 0) > 0 then
-                    pcall(function()
-                        MerchantBuy:FireServer("CheesePack")
-                    end)
-                end
-            end
-            
-            if Config.MerchantItem == "TicketPack" or Config.MerchantItem == "Both" then
-                if (merchant.TicketPack or 0) > 0 then
-                    pcall(function()
-                        MerchantBuy:FireServer("TicketPack")
-                    end)
-                end
-            end
+        if State.Milk > 0 and State.MilkPrice >= Cfg.SellThreshold then
+            pcall(function() SellMilk:FireServer() end)
         end
     end
 end)
 
--- Auto Upgrades (SkillTreeConfig uses .Nodes array, costs are .Money or .TotalRolls)
-spawn(function()
-    while true do
-        wait(5)
-        if Config.AutoUpgrades then
-            local success, data = pcall(function()
-                return GetSkillTreeData:InvokeServer()
-            end)
-            
-            if success and data and type(data) == "table" then
-                -- data from GetSkillTreeData has the player's unlocked skills dictionary at data.Unlocked
-                local unlockedSkills = data.Unlocked or {}
-                
-                -- Try to require the SkillTreeConfig to get node definitions
-                local configOk, SkillTreeConfig = pcall(function()
-                    return require(ReplicatedStorage.Shared.Config.SkillTreeConfig)
-                end)
-                
-                if configOk and SkillTreeConfig and SkillTreeConfig.Nodes then
-                    -- Use latest money and rolls from returned data, falling back to State
-                    local currentMoney = data.Money or State.Money or 0
-                    local currentTotalRolls = data.TotalRolls or State.TotalRolls or 0
-                    
-                    for _, node in ipairs(SkillTreeConfig.Nodes) do
-                        if not unlockedSkills[node.id] then
-                            -- Check prerequisites
-                            local canBuy = true
-                            if node.prereq then
-                                for _, prereqId in ipairs(node.prereq) do
-                                    if not unlockedSkills[prereqId] then
-                                        canBuy = false
-                                        break
-                                    end
-                                end
-                            end
-                            
-                            if canBuy and node.cost then
-                                -- Check if we can afford
-                                local canAfford = true
-                                if node.cost.Money and currentMoney < node.cost.Money then
-                                    canAfford = false
-                                end
-                                if node.cost.TotalRolls and currentTotalRolls < node.cost.TotalRolls then
-                                    canAfford = false
-                                end
-                                
-                                if canAfford then
-                                    local shouldBuy = false
-                                    
-                                    if Config.UpgradeMode == "Smart" then
-                                        -- Expanded priority upgrade types covering all branches
-                                        local priorityTypes = {
-                                            "Luck", "SuperLuck", "RollSpeed", "AutoRoll", "EquipSlots",
-                                            "MutationUnlock", "FriendLuck", "RebirthUnlocked", 
-                                            "MilkRate", "Storage", "Potion", "Food", "Drop",
-                                            "Composite" -- starter nodes
-                                        }
-                                        
-                                        if node.effect and node.effect.Type then
-                                            for _, pType in ipairs(priorityTypes) do
-                                                if node.effect.Type == pType then
-                                                    shouldBuy = true
-                                                    break
-                                                end
-                                            end
-                                        end
-                                        -- Always buy if no effect (starter nodes)
-                                        if not node.effect then
-                                            shouldBuy = true
-                                        end
-                                    else
-                                        shouldBuy = true -- Buy all available
-                                    end
-                                    
-                                    if shouldBuy then
-                                        pcall(function()
-                                            PurchaseSkill:FireServer(node.id)
-                                        end)
-                                        wait(0.5)
-                                    end
-                                end
-                            end
-                        end
-                    end
+-- ─── Auto Merchant ────────────────────────────────────────────────────────────
+-- MerchantBuy:FireServer(item) (MerchantController.client.lua:196-208)
+task.spawn(function()
+    while task.wait(5) do
+        if not Cfg.AutoMerchant then continue end
+        local m = State.MerchantData
+        if not m then continue end
+        if (Cfg.MerchantItem == "CheesePack" or Cfg.MerchantItem == "Both") and (m.CheesePack or 0) > 0 then
+            pcall(function() MerchantBuy:FireServer("CheesePack") end)
+        end
+        if (Cfg.MerchantItem == "TicketPack" or Cfg.MerchantItem == "Both") and (m.TicketPack or 0) > 0 then
+            pcall(function() MerchantBuy:FireServer("TicketPack") end)
+        end
+    end
+end)
+
+-- ─── Auto Upgrades ────────────────────────────────────────────────────────────
+-- PurchaseSkill:FireServer(id) (SkillTreeController.client.lua:658)
+-- GetSkillTreeData:InvokeServer() returns { OwnedNodes={}, Skills={} }
+task.spawn(function()
+    while task.wait(4) do
+        if not Cfg.AutoUpgrades then continue end
+        local ok, data = pcall(function() return GetSkillTreeData:InvokeServer() end)
+        if not ok or not data then continue end
+        local owned = data.OwnedNodes or data.Skills or {}
+
+        for _, node in ipairs(SkillTreeConfig.Nodes or {}) do
+            local id = node.id
+            if owned[id] then continue end
+
+            local prereqMet = true
+            for _, pre in ipairs(node.prereq or {}) do
+                if not owned[pre] then prereqMet = false; break end
+            end
+            if not prereqMet then continue end
+
+            local cost = node.cost or {}
+            if State.Money < (cost.Money or 0) then continue end
+            if State.Rolls  < (cost.TotalRolls or 0) then continue end
+
+            if Cfg.SmartUpgrades and not PRIORITY_BRANCHES[node.branch] then continue end
+
+            pcall(function() PurchaseSkill:FireServer(id) end)
+            task.wait(0.4)
+        end
+    end
+end)
+
+-- ─── Auto Equip Best ─────────────────────────────────────────────────────────
+task.spawn(function()
+    while task.wait(10) do
+        if not Cfg.AutoEquipBest then continue end
+        local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
+        if not bp then continue end
+        local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
+        if btn then pcall(function() btn.MouseButton1Click:Fire() end) end
+    end
+end)
+
+-- ─── Auto Rebirth ─────────────────────────────────────────────────────────────
+-- Rebirth:FireServer() | GetRebirthInfo:InvokeServer() (RebirthPanel.lua:270,148)
+task.spawn(function()
+    while task.wait(10) do
+        if not Cfg.AutoRebirth then continue end
+        local ok, info = pcall(function() return GetRebirthInfo:InvokeServer() end)
+        if ok and info and info.CanAfford then
+            pcall(function() Rebirth:FireServer() end)
+            print("[HatchCowsAuto] Rebirth performed!")
+            task.wait(3)
+            if Cfg.AutoEquipBest then
+                local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
+                if bp then
+                    local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
+                    if btn then pcall(function() btn.MouseButton1Click:Fire() end) end
                 end
             end
         end
     end
 end)
 
--- Auto Equip Best
-spawn(function()
-    while true do
-        wait(10)
-        if Config.AutoEquipBest then
-            TriggerEquipBest()
+-- ─── Anti-AFK ─────────────────────────────────────────────────────────────────
+task.spawn(function()
+    while task.wait(60) do
+        if not Cfg.AntiAFK then continue end
+        if tick() - State.LastActivity > 240 then
+            local char = LocalPlayer.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum.Jump = true
+                task.wait(0.1)
+                hum.Jump = false
+            end
+            State.LastActivity = tick()
         end
     end
 end)
 
--- Auto Rebirth
-spawn(function()
-    while true do
-        wait(Config.RebirthCheckInterval)
-        if Config.AutoRebirth then
-            local success, info = pcall(function()
-                return GetRebirthInfo:InvokeServer()
-            end)
-            
-            if success and info and type(info) == "table" and info.CanAfford then
-                pcall(function()
-                    Rebirth:FireServer()
-                end)
-                print("[HatchCowsAuto] Rebirth performed!")
-                wait(3)
-                
-                -- Re-equip best after rebirth
-                if Config.AutoEquipBest then
-                    wait(2)
-                    TriggerEquipBest()
-                end
-            end
-        end
-    end
-end)
+-- ─── Rayfield Window ─────────────────────────────────────────────────────────
+local Window = Rayfield:CreateWindow({
+    Name            = "Hatch Cows Auto",
+    LoadingTitle    = "Hatch Cows Auto",
+    LoadingSubtitle = "Initialising...",
+    ConfigurationSaving = {
+        Enabled    = true,
+        FolderName = "HatchCowsAuto",
+        FileName   = "Config",
+    },
+    Discord   = { Enabled = false },
+    KeySystem = false,
+})
 
--- ══════════════════════════════════════════════════════════
--- STATUS LABEL UPDATER
--- ══════════════════════════════════════════════════════════
-local function FormatMoney(n)
-    if not n then return "0" end
-    local abs = math.abs(n)
-    local result
-    if abs >= 1e12 then
-        result = string.format("%.1ft", abs / 1e12)
-    elseif abs >= 1e9 then
-        result = string.format("%.1fb", abs / 1e9)
-    elseif abs >= 1e6 then
-        result = string.format("%.1fm", abs / 1e6)
-    elseif abs >= 1e3 then
-        result = string.format("%.1fk", abs / 1e3)
-    else
-        result = tostring(math.floor(abs))
-    end
-    result = result:gsub("%.0([kmbt])", "%1") -- remove ".0" suffixes
-    if n < 0 then result = "-" .. result end
-    return result
-end
+-- ══ Tab: Automation ══════════════════════════════════════════════════════════
+local AutoTab = Window:CreateTab("Automation", 4483362458)
 
-spawn(function()
-    while true do
-        wait(3)
-        pcall(function()
-            MoneyLabel:Set("Money: " .. FormatMoney(State.Money))
-            MilkLabel:Set("Milk: " .. FormatMoney(State.Milk))
-            RollsLabel:Set("Total Rolls: " .. FormatMoney(State.TotalRolls))
-            PriceLabel:Set("Milk Price: " .. tostring(State.CurrentMilkPrice) .. "$/unit")
-            
-            if State.Merchant then
-                local cheese = State.Merchant.CheesePack or 0
-                local ticket = State.Merchant.TicketPack or 0
-                MerchantLabel:Set("Merchant: Cheese=" .. cheese .. " Ticket=" .. ticket)
-            else
-                MerchantLabel:Set("Merchant: N/A")
-            end
+AutoTab:CreateSection("Hatching", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Hatch",
+    Info         = "Keeps the game's built-in auto-roll running via _G.__setAuto.",
+    CurrentValue = false,
+    Flag         = "AutoHatch",
+    Callback     = function(v)
+        Cfg.AutoHatch = v
+        if v and _G.__setAuto then pcall(_G.__setAuto, true) end
+    end,
+})
+
+AutoTab:CreateSection("Selling", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Sell Milk",
+    Info         = "Fires SellMilk to server when price meets your threshold.",
+    CurrentValue = false,
+    Flag         = "AutoSell",
+    Callback     = function(v) Cfg.AutoSell = v end,
+})
+
+AutoTab:CreateDropdown({
+    Name          = "Sell Threshold",
+    Info          = "Minimum milk price (out of 20) before auto-selling.",
+    Options       = {"Low (5)", "Average (10)", "Good (15)", "Insane (18)"},
+    CurrentOption = "Average (10)",
+    MultiSelection = false,
+    Flag          = "SellThreshold",
+    Callback      = function(opt)
+        local map = {["Low (5)"]=5,["Average (10)"]=10,["Good (15)"]=15,["Insane (18)"]=18}
+        Cfg.SellThreshold = map[opt] or 10
+    end,
+})
+
+AutoTab:CreateSection("Merchant", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Buy Merchant",
+    Info         = "Fires MerchantBuy when the Travelling Merchant has stock.",
+    CurrentValue = false,
+    Flag         = "AutoMerchant",
+    Callback     = function(v) Cfg.AutoMerchant = v end,
+})
+
+AutoTab:CreateDropdown({
+    Name          = "Merchant Item",
+    Info          = "Which item to buy from the merchant.",
+    Options       = {"CheesePack", "TicketPack", "Both"},
+    CurrentOption = "CheesePack",
+    MultiSelection = false,
+    Flag          = "MerchantItem",
+    Callback      = function(opt) Cfg.MerchantItem = opt end,
+})
+
+AutoTab:CreateSection("Upgrades", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Upgrades",
+    Info         = "Purchases skill tree nodes via PurchaseSkill when affordable.",
+    CurrentValue = false,
+    Flag         = "AutoUpgrades",
+    Callback     = function(v) Cfg.AutoUpgrades = v end,
+})
+
+AutoTab:CreateToggle({
+    Name         = "Smart Upgrades",
+    Info         = "Only buy Luck, SuperLuck, Speed and Milk branches first.",
+    CurrentValue = true,
+    Flag         = "SmartUpgrades",
+    Callback     = function(v) Cfg.SmartUpgrades = v end,
+})
+
+AutoTab:CreateSection("Cows & Rebirth", false)
+
+AutoTab:CreateToggle({
+    Name         = "Auto Equip Best",
+    Info         = "Clicks the Equip Best button every 10 seconds.",
+    CurrentValue = false,
+    Flag         = "AutoEquipBest",
+    Callback     = function(v) Cfg.AutoEquipBest = v end,
+})
+
+AutoTab:CreateToggle({
+    Name         = "Auto Rebirth",
+    Info         = "Fires Rebirth as soon as GetRebirthInfo returns CanAfford=true.",
+    CurrentValue = false,
+    Flag         = "AutoRebirth",
+    Callback     = function(v) Cfg.AutoRebirth = v end,
+})
+
+-- ══ Tab: Spawn Cow ═══════════════════════════════════════════════════════════
+-- AddCow:FireServer(name, rarityIndex, variant?) confirmed exploitable
+local SpawnTab = Window:CreateTab("Spawn Cow")
+
+SpawnTab:CreateSection("Add Any Cow", false)
+
+SpawnTab:CreateParagraph({
+    Title   = "How it works",
+    Content = "Fires AddCow to the server with the selected cow name and its rarity index. The server adds it directly to your inventory.",
+})
+
+SpawnTab:CreateDropdown({
+    Name          = "Select Cow",
+    Info          = "Choose which cow to add to your inventory.",
+    Options       = COW_NAMES,
+    CurrentOption = "Reaper",
+    MultiSelection = false,
+    Flag          = "SelectedCow",
+    Callback      = function(opt) Cfg.SelectedCow = opt end,
+})
+
+SpawnTab:CreateButton({
+    Name     = "Spawn Selected Cow",
+    Info     = "Fires AddCow:FireServer(name, rarityIndex) to add it now.",
+    Interact = "Spawn",
+    Callback = function()
+        local name = Cfg.SelectedCow
+        local rarity = COW_RARITY[name] or 1
+        local ok, err = pcall(function()
+            AddCow:FireServer(name, rarity)
         end)
-    end
-end)
-
--- ══════════════════════════════════════════════════════════
--- INITIALIZATION
--- ══════════════════════════════════════════════════════════
-LoadConfig()
-
--- Initial price fetch
-spawn(function()
-    wait(2)
-    pcall(function()
-        local result = GetMilkPrice:InvokeServer()
-        if result and type(result) == "table" then
-            State.CurrentMilkPrice = result.price or 1
-            State.NextPriceChangeTime = result.nextRepickTime or 0
+        if ok then
+            print("[HatchCowsAuto] Spawned cow: " .. name .. " (rarity " .. rarity .. ")")
+        else
+            warn("[HatchCowsAuto] AddCow failed: " .. tostring(err))
         end
-    end)
-end)
+    end,
+})
 
--- If auto hatch was saved as on, re-enable it after a delay
-spawn(function()
-    wait(5)
-    if Config.AutoHatch and _G.__setAuto then
-        pcall(function() _G.__setAuto(true) end)
-    end
-end)
+SpawnTab:CreateButton({
+    Name     = "Spam Best Cow (Reaper x10)",
+    Info     = "Fires AddCow 10 times for Reaper (rarity 14).",
+    Interact = "Spam",
+    Callback = function()
+        for i = 1, 10 do
+            pcall(function() AddCow:FireServer("Reaper", 14) end)
+            task.wait(0.15)
+        end
+        print("[HatchCowsAuto] Spammed 10x Reaper")
+    end,
+})
+
+SpawnTab:CreateSection("Claim Offline Earnings", false)
+
+SpawnTab:CreateButton({
+    Name     = "Claim Offline Earnings",
+    Info     = "Fires ClaimOffline:FireServer() to instantly collect offline money.",
+    Interact = "Claim",
+    Callback = function()
+        pcall(function() ClaimOffline:FireServer() end)
+        print("[HatchCowsAuto] Claimed offline earnings")
+    end,
+})
+
+-- ══ Tab: Settings ════════════════════════════════════════════════════════════
+local SettingsTab = Window:CreateTab("Settings")
+
+SettingsTab:CreateSection("Anti-AFK", false)
+
+SettingsTab:CreateToggle({
+    Name         = "Anti-AFK",
+    Info         = "Jumps every 4 minutes of inactivity to prevent kick.",
+    CurrentValue = false,
+    Flag         = "AntiAFK",
+    Callback     = function(v)
+        Cfg.AntiAFK = v
+        pcall(function() SetSettings:FireServer("antiAfk", v) end)
+    end,
+})
+
+SettingsTab:CreateSection("Quick Actions", false)
+
+SettingsTab:CreateButton({
+    Name     = "Sell Milk Now",
+    Info     = "Immediately fires SellMilk regardless of price.",
+    Interact = "Sell",
+    Callback = function()
+        pcall(function() SellMilk:FireServer() end)
+        print("[HatchCowsAuto] Sold milk")
+    end,
+})
+
+SettingsTab:CreateButton({
+    Name     = "Claim Fuse",
+    Info     = "Fires FuseClaim:FireServer() to collect a pending fuse.",
+    Interact = "Claim",
+    Callback = function()
+        pcall(function() FuseClaim:FireServer() end)
+        print("[HatchCowsAuto] Claimed fuse")
+    end,
+})
 
 print("[HatchCowsAuto] Loaded successfully!")

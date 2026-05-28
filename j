@@ -160,22 +160,15 @@ local Cfg = {
     AutoRoll        = false,
     FastRoll        = false,
     AutoBattle      = false,
-    SmartBattle     = true,
-    SmartSafety     = 0.85,
-    AutoBoss        = false,
-    BossId          = "panther_espada",
+    AutoWorldBosses = false,
+    SelectedWorld   = "Hueco",
     AutoRaid        = false,
     RaidBossId      = "Divine General",
     RaidDifficulty  = "Easy",
-    TeleportFallback = true,
-    TeleportBeforeBattle = true,
-    BossStartDistance = 35,
-    AutoWorldBosses = false,
     AutoClaimQuests = false,
     AutoEquipBest   = false,
     EquipMode       = "ATK",      -- "ATK", "HP", "BALANCED"
-    BattleCardId    = "slime",    -- enemy card ID for auto battle
-    BattleEnemyCount = 1,
+    BattleCardId    = "slime",    -- fallback enemy card ID for auto battle
 }
 
 local State = {
@@ -193,6 +186,9 @@ local State = {
     WorldBossIndex  = 1,
     WorldEnemyCleared = {},
 }
+
+local SMART_BATTLE_SAFETY = 0.85
+local WORLD_START_DISTANCE = 35
 
 -- Helpers
 local _logThrottle = {}
@@ -501,14 +497,12 @@ BattleVersus.OnClientEvent:Connect(function()
 end)
 
 local function chooseSmartEnemy(count)
-    if not Cfg.SmartBattle then
-        return Cfg.BattleCardId
-    end
     local power = getPartyPower()
     if power <= 0 then
         return Cfg.BattleCardId
     end
-    local limit = power * math.clamp(tonumber(Cfg.SmartSafety) or 0.85, 0.1, 2)
+    count = math.max(1, math.floor(tonumber(count) or 1))
+    local limit = power * SMART_BATTLE_SAFETY
     local bestId, bestScore = Cfg.BattleCardId, 0
     for id, data in pairs(CARD_DATA) do
         if type(id) == "string" and type(data) == "table" then
@@ -528,18 +522,14 @@ end
 
 task.spawn(function()
     while task.wait(2) do
-        if Cfg.AutoBattle then
+        if Cfg.AutoBattle and not Cfg.AutoWorldBosses then
             if State.InBattle then
                 logEvery("battle_waiting", "In battle, waiting...", 10)
             else
                 local gap = tick() - State.LastBattleTime
                 if gap < 1.5 then task.wait(1.5 - gap) end
-                local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
-                local enemies = {}
-                local enemyId = chooseSmartEnemy(count)
-                for i = 1, count do
-                    enemies[i] = enemyId
-                end
+                local enemyId = chooseSmartEnemy(1)
+                local enemies = {enemyId}
                 local tpOk, tpMsg = teleportToBattleTarget(enemyId, false)
                 if not tpOk then
                     logEvery("enemy_tp_missing", "Could not find live enemy model for " .. tostring(enemyId) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
@@ -549,7 +539,7 @@ task.spawn(function()
                 end)
                 if ok then
                     State.InBattle = true
-                    logEvery("battle_fired", "Auto Battle started vs " .. count .. "x " .. enemyId, 2)
+                    logEvery("battle_fired", "Auto Battle started vs " .. enemyId, 2)
                 else
                     logEvery("battle_err", "DebugStartBattle error: " .. tostring(err), 5)
                 end
@@ -568,6 +558,10 @@ local BOSS_MAP = {
     sasuke_ms = "Naruto",
     itachi_akatsuki = "Naruto",
     madara_edo = "Naruto",
+    bio_spawn = "Cell",
+    cyborg_17 = "Cell",
+    cyborg_18 = "Cell",
+    hidden_prodigy = "Cell",
     bio_android_incomplete = "Cell",
     whitebeard_worldbreaker = "Marine",
     aokiji_frost_admiral = "Marine",
@@ -585,6 +579,7 @@ local BOSS_MODEL_NAMES = {
     sasuke_ms = {"Sasuke", "Avenging Shinobi"},
     itachi_akatsuki = {"itachi", "Akatsuki Phantom"},
     madara_edo = {"madara", "Reanimated Legend"},
+    bio_spawn = {"Bio-Spawn", "bio_android_incomplete", "Incomplete Bio-Android"},
     bio_android_incomplete = {"bio_android_incomplete", "Incomplete Bio-Android"},
     cyborg_17 = {"cyborg 17", "Cyborg 17"},
     cyborg_18 = {"cyborg 18", "Cyborg 18"},
@@ -595,46 +590,35 @@ local BOSS_MODEL_NAMES = {
     akainu_infernal_judgement = {"Infernal Judgement"},
 }
 
-local WORLD_BOSS_ORDER = {
-    "panther_espada",
-    "ulmiorra",
-    "itadori_yuji",
-    "mahito",
-    "toji_fushiguro",
-    "jogo",
-    "sasuke_ms",
-    "itachi_akatsuki",
-    "madara_edo",
-    "bio_android_incomplete",
-    "whitebeard_worldbreaker",
-    "aokiji_frost_admiral",
-    "kizaru_light_admiral",
-    "akainu_infernal_judgement",
-}
-
 local WORLD_STAGES = {
-    {World = "Hueco", Kind = "boss", BossId = "panther_espada", Label = "Panther Espada"},
-    {World = "Hueco", Kind = "boss", BossId = "ulmiorra", Label = "Ulmiorra"},
-
-    {World = "Shibuya", Kind = "boss", BossId = "itadori_yuji", Label = "Cursed Vessel"},
-    {World = "Shibuya", Kind = "boss", BossId = "mahito", Label = "Patchwork Curse"},
-    {World = "Shibuya", Kind = "boss", BossId = "toji_fushiguro", Label = "Sorcerer Killer"},
-    {World = "Shibuya", Kind = "boss", BossId = "jogo", Label = "Volcanic Curse"},
-
-    {World = "Naruto", Kind = "boss", BossId = "sasuke_ms", Label = "Avenging Shinobi"},
-    {World = "Naruto", Kind = "boss", BossId = "itachi_akatsuki", Label = "Akatsuki Phantom"},
-    {World = "Naruto", Kind = "boss", BossId = "madara_edo", Label = "Reanimated Legend"},
-
-    {World = "Cell", Kind = "boss", BossId = "cyborg_17", Label = "Cyborg 17"},
-    {World = "Cell", Kind = "boss", BossId = "cyborg_18", Label = "Cyborg 18"},
-    {World = "Cell", Kind = "boss", BossId = "hidden_prodigy", Label = "Half-Blood Prodigy"},
-    {World = "Cell", Kind = "enemy", Key = "cell_bio_spawn", EnemyIds = {"bio_spawn", "bio_spawn"}, Label = "Bio-Spawn", SkipIfBossDefeated = "bio_android_incomplete"},
-    {World = "Cell", Kind = "boss", BossId = "bio_android_incomplete", Label = "Incomplete Bio-Android"},
-
-    {World = "Marine", Kind = "boss", BossId = "whitebeard_worldbreaker", Label = "Worldbreaker"},
-    {World = "Marine", Kind = "boss", BossId = "aokiji_frost_admiral", Label = "Frost Admiral"},
-    {World = "Marine", Kind = "boss", BossId = "kizaru_light_admiral", Label = "Light Admiral"},
-    {World = "Marine", Kind = "boss", BossId = "akainu_infernal_judgement", Label = "Infernal Judgement"},
+    Hueco = {
+        {World = "Hueco", Kind = "boss", BossId = "panther_espada", Label = "Panther Espada"},
+        {World = "Hueco", Kind = "boss", BossId = "ulmiorra", Label = "Ulmiorra"},
+    },
+    Shibuya = {
+        {World = "Shibuya", Kind = "boss", BossId = "itadori_yuji", Label = "Cursed Vessel"},
+        {World = "Shibuya", Kind = "boss", BossId = "mahito", Label = "Patchwork Curse"},
+        {World = "Shibuya", Kind = "boss", BossId = "toji_fushiguro", Label = "Sorcerer Killer"},
+        {World = "Shibuya", Kind = "boss", BossId = "jogo", Label = "Volcanic Curse"},
+    },
+    Naruto = {
+        {World = "Naruto", Kind = "boss", BossId = "sasuke_ms", Label = "Avenging Shinobi"},
+        {World = "Naruto", Kind = "boss", BossId = "itachi_akatsuki", Label = "Akatsuki Phantom"},
+        {World = "Naruto", Kind = "boss", BossId = "madara_edo", Label = "Reanimated Legend"},
+    },
+    Cell = {
+        {World = "Cell", Kind = "boss", BossId = "cyborg_17", Label = "Cyborg 17"},
+        {World = "Cell", Kind = "boss", BossId = "cyborg_18", Label = "Cyborg 18"},
+        {World = "Cell", Kind = "boss", BossId = "hidden_prodigy", Label = "Half-Blood Prodigy"},
+        {World = "Cell", Kind = "enemy", Key = "Cell:bio_spawn", EnemyIds = {"bio_spawn", "bio_spawn"}, Label = "Bio-Spawn", SkipIfBossDefeated = "bio_android_incomplete"},
+        {World = "Cell", Kind = "boss", BossId = "bio_android_incomplete", Label = "Incomplete Bio-Android"},
+    },
+    Marine = {
+        {World = "Marine", Kind = "boss", BossId = "whitebeard_worldbreaker", Label = "Worldbreaker"},
+        {World = "Marine", Kind = "boss", BossId = "aokiji_frost_admiral", Label = "Frost Admiral"},
+        {World = "Marine", Kind = "boss", BossId = "kizaru_light_admiral", Label = "Light Admiral"},
+        {World = "Marine", Kind = "boss", BossId = "akainu_infernal_judgement", Label = "Infernal Judgement"},
+    },
 }
 
 local BOSS_DEFEAT_ALIASES = {
@@ -646,7 +630,7 @@ local BOSS_DEFEAT_ALIASES = {
 }
 
 local function requestTeleport(destination)
-    if Cfg.TeleportFallback and TeleportEvent and type(destination) == "string" and destination ~= "" then
+    if TeleportEvent and type(destination) == "string" and destination ~= "" then
         pcall(function() TeleportEvent:FireServer(destination) end)
         task.wait(0.75)
     end
@@ -734,7 +718,7 @@ local function teleportToCFrameIfNeeded(cf, label)
         return false, "missing root or target"
     end
     local distance = (root.Position - cf.Position).Magnitude
-    if distance <= (tonumber(Cfg.BossStartDistance) or 35) then
+    if distance <= WORLD_START_DISTANCE then
         logEvery("tp_close_" .. tostring(label), "Already close to " .. tostring(label) .. " (" .. math.floor(distance) .. " studs)", 3)
         return true, "close"
     end
@@ -745,11 +729,12 @@ local function teleportToCFrameIfNeeded(cf, label)
     return true, "teleported"
 end
 
-function teleportToBattleTarget(cardId, isBoss)
-    if not Cfg.TeleportBeforeBattle then
-        return true, "disabled"
-    end
+function teleportToBattleTarget(cardId, isBoss, destination)
     cardId = string.lower(tostring(cardId or ""))
+    if type(destination) == "string" and destination ~= "" then
+        requestTeleport(destination)
+        task.wait(1)
+    end
     local names = getBattleTargetNames(cardId)
     local target, cf = findTargetByNames(names)
     if not target and isBoss then
@@ -784,20 +769,14 @@ local function isBossDefeated(defeatedBosses, bossId)
     return false
 end
 
-local function getNextWorldBoss()
-    local defeated = getDefeatedBosses()
-    for i, bossId in ipairs(WORLD_BOSS_ORDER) do
-        if not isBossDefeated(defeated, bossId) then
-            State.WorldBossIndex = i
-            return bossId
-        end
+local function getNextWorldStage(worldName)
+    worldName = tostring(worldName or Cfg.SelectedWorld or "Hueco")
+    local stages = WORLD_STAGES[worldName]
+    if type(stages) ~= "table" then
+        return nil
     end
-    return nil
-end
-
-local function getNextWorldStage()
     local defeated = getDefeatedBosses()
-    for i, stage in ipairs(WORLD_STAGES) do
+    for i, stage in ipairs(stages) do
         if stage.Kind == "boss" then
             if not isBossDefeated(defeated, stage.BossId) then
                 State.WorldBossIndex = i
@@ -818,8 +797,11 @@ local function startBossBattle(bossId)
     if not RequestBossBattle then
         return false, "RequestBossBattle remote missing"
     end
-    bossId = string.lower(tostring(bossId or Cfg.BossId))
-    local tpOk, tpMsg = teleportToBattleTarget(bossId, true)
+    bossId = string.lower(tostring(bossId or ""))
+    if bossId == "" then
+        return false, "No boss selected"
+    end
+    local tpOk, tpMsg = teleportToBattleTarget(bossId, true, BOSS_MAP[bossId] or Cfg.SelectedWorld)
     if not tpOk then
         logEvery("boss_tp_missing", "Could not find live boss model for " .. bossId .. "; requesting anyway (" .. tostring(tpMsg) .. ")", 8)
     end
@@ -851,8 +833,7 @@ local function startWorldStage(stage)
         if type(enemies) ~= "table" or #enemies == 0 then
             return false, "World enemy stage has no enemies"
         end
-        requestTeleport(stage.World)
-        local tpOk, tpMsg = teleportToBattleTarget(enemies[1], false)
+        local tpOk, tpMsg = teleportToBattleTarget(enemies[1], false, stage.World)
         if not tpOk then
             logEvery("world_enemy_tp_missing", "Could not find world enemy " .. tostring(enemies[1]) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
         end
@@ -871,36 +852,15 @@ local function startWorldStage(stage)
 end
 
 task.spawn(function()
-    while task.wait(3) do
-        if Cfg.AutoBoss and not Cfg.AutoWorldBosses then
-            if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
-                logEvery("boss_waiting", "Already in battle/raid, waiting...", 10)
-            elseif tick() - State.LastBossTime >= 8 then
-                local ok, msg = startBossBattle(Cfg.BossId)
-                if ok then
-                    logEvery("boss_started", "Boss battle requested: " .. tostring(Cfg.BossId), 2)
-                else
-                    logEvery("boss_err", "Boss unavailable: " .. tostring(msg), 10)
-                    State.LastBossTime = tick()
-                end
-            end
-        end
-    end
-end)
-
-task.spawn(function()
     while task.wait(4) do
         if Cfg.AutoWorldBosses then
             if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
                 logEvery("world_waiting", "World boss progression waiting for current battle/raid...", 10)
             elseif tick() - State.LastBossTime >= 8 then
-                local stage = getNextWorldStage()
+                local stage = getNextWorldStage(Cfg.SelectedWorld)
                 if not stage then
-                    logEvery("world_done", "All known world stages are cleared/defeated", 30)
+                    logEvery("world_done", tostring(Cfg.SelectedWorld) .. " stages are cleared/defeated", 30)
                 else
-                    if stage.BossId then
-                        Cfg.BossId = stage.BossId
-                    end
                     local ok, msg = startWorldStage(stage)
                     if ok then
                         logEvery("world_started", "World progression started " .. tostring(stage.Kind) .. ": " .. tostring(stage.Label or stage.BossId or stage.Key), 2)
@@ -938,9 +898,7 @@ local function createRaid()
     if not RaidPartyCreate or not RaidPartyReady then
         return false, "Raid remotes missing"
     end
-    if Cfg.TeleportFallback then
-        requestTeleport("Raid")
-    end
+    requestTeleport("Raid")
     RaidPartyCreate:FireServer({
         IsPrivate = false,
         BossId = Cfg.RaidBossId,
@@ -1067,10 +1025,15 @@ BattleTab:CreateSection("Auto Battle", false)
 
 BattleTab:CreateToggle({
     Name         = "Auto Battle",
-    Info         = "Fires DebugStartBattle when not in battle. Restarts when BattleEnd fires.",
+    Info         = "Automatically picks one safe enemy from your deck power. Auto Worlds takes priority.",
     CurrentValue = false,
     Flag         = "AutoBattle",
-    Callback     = function(v) Cfg.AutoBattle = v end,
+    Callback     = function(v)
+        Cfg.AutoBattle = v
+        if v then
+            Cfg.AutoWorldBosses = false
+        end
+    end,
 })
 
 -- Sorted card list for enemy picker (by RarityNumber ascending for readability)
@@ -1087,8 +1050,8 @@ do
 end
 
 BattleTab:CreateDropdown({
-    Name           = "Enemy Card",
-    Info           = "Pick which card to fight. Uses DebugStartBattle remote.",
+    Name           = "Fallback Enemy",
+    Info           = "Used only if your deck power cannot be estimated for automatic enemy selection.",
     Options        = ENEMY_OPTIONS,
     CurrentOption  = "slime (Skeleton)",
     MultiSelection = false,
@@ -1101,44 +1064,14 @@ BattleTab:CreateDropdown({
     end,
 })
 
-BattleTab:CreateSlider({
-    Name     = "Enemy Count (1-4)",
-    Info     = "Number of enemy cards to face per battle.",
-    Range    = {1, 4},
-    Increment = 1,
-    CurrentValue = 1,
-    Flag     = "BattleEnemyCount",
-    Callback = function(v) Cfg.BattleEnemyCount = v end,
-})
-
-BattleTab:CreateToggle({
-    Name         = "Smart Enemy",
-    Info         = "Chooses the strongest enemy your current deck should handle. Disable to force the dropdown enemy.",
-    CurrentValue = true,
-    Flag         = "SmartBattle",
-    Callback     = function(v) Cfg.SmartBattle = v end,
-})
-
-BattleTab:CreateSlider({
-    Name     = "Smart Safety",
-    Info     = "Lower is safer. 0.85 means enemy power must stay below 85% of your deck estimate.",
-    Range    = {0.25, 1.5},
-    Increment = 0.05,
-    CurrentValue = 0.85,
-    Flag     = "SmartSafety",
-    Callback = function(v) Cfg.SmartSafety = tonumber(v) or 0.85 end,
-})
-
 BattleTab:CreateSection("Manual Battle", false)
 
 BattleTab:CreateButton({
     Name     = "Start Battle Now",
-    Info     = "Immediately starts a battle with selected enemy.",
+    Info     = "Immediately starts one battle with the fallback enemy.",
     Interact = "Fight",
     Callback = function()
-        local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
-        local enemies = {}
-        for i = 1, count do enemies[i] = Cfg.BattleCardId end
+        local enemies = {Cfg.BattleCardId}
         local tpOk, tpMsg = teleportToBattleTarget(Cfg.BattleCardId, false)
         if not tpOk then
             warn("[AnimeCardAuto] Enemy TP skipped: " .. tostring(tpMsg))
@@ -1148,116 +1081,33 @@ BattleTab:CreateButton({
     end,
 })
 
--- Boss and raid automation use the same direct remotes as the game's UI.
-local BOSS_IDS = {
-    "panther_espada",
-    "ulmiorra",
-    "itadori_yuji",
-    "mahito",
-    "toji_fushiguro",
-    "jogo",
-    "sasuke_ms",
-    "itachi_akatsuki",
-    "madara_edo",
-    "bio_android_incomplete",
-    "whitebeard_worldbreaker",
-    "aokiji_frost_admiral",
-    "kizaru_light_admiral",
-    "akainu_infernal_judgement",
-}
+BattleTab:CreateSection("World Progression", false)
 
-local BOSS_OPTIONS = {}
-for _, id in ipairs(BOSS_IDS) do
-    local data = CARD_DATA[id]
-    table.insert(BOSS_OPTIONS, id .. " (" .. (data and data.Name or id) .. ")")
-end
-
-local BossTab = Window:CreateTab("Boss")
-
-BossTab:CreateSection("Boss Battles", false)
-
-BossTab:CreateDropdown({
-    Name           = "Boss",
-    Info           = "Uses RequestBossBattle directly. Locked bosses or cooldowns still fail server-side.",
-    Options        = BOSS_OPTIONS,
-    CurrentOption  = "panther_espada (Panther Espada)",
+BattleTab:CreateDropdown({
+    Name           = "World",
+    Info           = "Auto Worlds runs this world's bosses in order, skipping bosses already marked defeated.",
+    Options        = {"Hueco", "Shibuya", "Naruto", "Cell", "Marine"},
+    CurrentOption  = "Hueco",
     MultiSelection = false,
-    Flag           = "BossId",
+    Flag           = "SelectedWorld",
     Callback       = function(opt)
         local choice = type(opt) == "table" and opt[1] or opt
-        if choice then
-            Cfg.BossId = string.match(choice, "^([^%s%(]+)")
+        if choice and WORLD_STAGES[choice] then
+            Cfg.SelectedWorld = choice
         end
     end,
 })
 
-BossTab:CreateToggle({
-    Name         = "Auto Boss",
-    Info         = "Teleports to the selected boss unless close, then requests the fight.",
-    CurrentValue = false,
-    Flag         = "AutoBoss",
-    Callback     = function(v) Cfg.AutoBoss = v end,
-})
-
-BossTab:CreateToggle({
+BattleTab:CreateToggle({
     Name         = "Auto Worlds",
-    Info         = "Runs world lead-up enemies first, then bosses. Advances only after victory or DefeatedBosses confirmation.",
+    Info         = "Teleports to the selected world enemy/boss, starts it, then advances after victory.",
     CurrentValue = false,
     Flag         = "AutoWorldBosses",
-    Callback     = function(v) Cfg.AutoWorldBosses = v end,
-})
-
-BossTab:CreateToggle({
-    Name         = "TP Before Battle",
-    Info         = "Moves your character near the boss/enemy model first. If already close, it starts without moving.",
-    CurrentValue = true,
-    Flag         = "TeleportBeforeBattle",
-    Callback     = function(v) Cfg.TeleportBeforeBattle = v end,
-})
-
-BossTab:CreateToggle({
-    Name         = "World TP Fallback",
-    Info         = "If the boss model is not loaded, uses the game's TeleportEvent to go to that world before starting.",
-    CurrentValue = true,
-    Flag         = "TeleportFallback",
-    Callback     = function(v) Cfg.TeleportFallback = v end,
-})
-
-BossTab:CreateSlider({
-    Name     = "Close Distance",
-    Info     = "If you are within this many studs from the boss/enemy, the script will not move you.",
-    Range    = {10, 120},
-    Increment = 5,
-    CurrentValue = 35,
-    Flag     = "BossStartDistance",
-    Callback = function(v) Cfg.BossStartDistance = tonumber(v) or 35 end,
-})
-
-BossTab:CreateButton({
-    Name     = "Start Boss Now",
-    Info     = "Teleports to the selected boss unless close, then invokes RequestBossBattle.",
-    Interact = "Fight",
-    Callback = function()
-        local ok, msg = startBossBattle(Cfg.BossId)
-        if ok then print("[AnimeCardAuto] Boss requested: " .. tostring(Cfg.BossId)) else warn("[AnimeCardAuto] Boss failed: " .. tostring(msg)) end
-    end,
-})
-
-BossTab:CreateButton({
-    Name     = "Start Next World Stage",
-    Info     = "Finds the first uncleared world stage: lead-up enemies first, then boss.",
-    Interact = "Next",
-    Callback = function()
-        local stage = getNextWorldStage()
-        if not stage then
-            print("[AnimeCardAuto] All known world stages are already cleared.")
-            return
+    Callback     = function(v)
+        Cfg.AutoWorldBosses = v
+        if v then
+            Cfg.AutoBattle = false
         end
-        if stage.BossId then
-            Cfg.BossId = stage.BossId
-        end
-        local ok, msg = startWorldStage(stage)
-        if ok then print("[AnimeCardAuto] World stage requested: " .. tostring(stage.Label or stage.BossId or stage.Key)) else warn("[AnimeCardAuto] World stage failed: " .. tostring(msg)) end
     end,
 })
 
@@ -1427,14 +1277,9 @@ SetTab:CreateButton({
         print("AutoRoll:        " .. tostring(Cfg.AutoRoll))
         print("FastRoll:        " .. tostring(Cfg.FastRoll))
         print("AutoBattle:      " .. tostring(Cfg.AutoBattle))
-        print("SmartBattle:     " .. tostring(Cfg.SmartBattle) .. " safety=" .. tostring(Cfg.SmartSafety))
-        print("  BattleCard:    " .. tostring(Cfg.BattleCardId))
-        print("  EnemyCount:    " .. tostring(Cfg.BattleEnemyCount))
-        print("AutoBoss:        " .. tostring(Cfg.AutoBoss) .. " boss=" .. tostring(Cfg.BossId))
-        print("AutoWorldBosses: " .. tostring(Cfg.AutoWorldBosses))
+        print("  FallbackEnemy: " .. tostring(Cfg.BattleCardId))
+        print("AutoWorlds:      " .. tostring(Cfg.AutoWorldBosses) .. " world=" .. tostring(Cfg.SelectedWorld))
         print("AutoRaid:        " .. tostring(Cfg.AutoRaid) .. " difficulty=" .. tostring(Cfg.RaidDifficulty))
-        print("TPBeforeBattle:  " .. tostring(Cfg.TeleportBeforeBattle) .. " close=" .. tostring(Cfg.BossStartDistance))
-        print("TeleportFallback:" .. tostring(Cfg.TeleportFallback))
         print("AutoClaimQuests: " .. tostring(Cfg.AutoClaimQuests))
         print("AutoEquipBest:   " .. tostring(Cfg.AutoEquipBest))
         print("  DeckMode:      " .. tostring(Cfg.EquipMode))

@@ -422,7 +422,7 @@ local function tpToBiomeGate(biomeId, mode)
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if root then
                 local pivot = g:GetPivot()
-                local offset = mode == "through" and 18 or -10
+                local offset = mode == "through" and -35 or -10
                 local pos = pivot.Position + Vector3.new(0, 5, 0) + (pivot.LookVector * offset)
                 root.CFrame = CFrame.new(pos, pos + pivot.LookVector)
                 print("[HatchCowsAuto] Teleported to " .. biomeId .. " gate (" .. tostring(mode or "front") .. ")")

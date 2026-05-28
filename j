@@ -1,22 +1,3 @@
---[[
-    Hatch Cows Auto - Full Script
-    UI: Rayfield (CustomFIeld fork) | No key system
-    All remotes verified from game source code.
-
-    Exploitable remotes confirmed:
-      AddCow(name, rarityIdx, variant?)  - fires any cow into inventory
-      SellMilk()                        - sells all milk
-      MerchantBuy(item)                 - buys CheesePack / TicketPack
-      PurchaseSkill(id)                 - buys skill tree node
-      Rebirth()                         - performs rebirth
-      SetSettings(key, value)           - changes server settings
-      FuseStart(cow1, cow2)             - starts a fuse
-      FuseClaim()                       - claims fuse result
-      UseItem(id)                       - uses an item
-      ClaimOffline()                    - claims offline earnings
-      SyncEquipped(table)               - syncs equipped cow list
-]]
-
 local Players        = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer    = Players.LocalPlayer

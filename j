@@ -1,727 +1,1430 @@
---[[
-    Hatch Cows Auto - Full Script
-    UI: Rayfield (CustomFIeld fork) | No key system
-    All remotes verified from game source code.
-
-    Exploitable remotes confirmed:
-      AddCow(name, rarityIdx, variant?)  - fires any cow into inventory
-      SellMilk()                        - sells all milk
-      MerchantBuy(item)                 - buys CheesePack / TicketPack
-      PurchaseSkill(id)                 - buys skill tree node
-      Rebirth()                         - performs rebirth
-      SetSettings(key, value)           - changes server settings
-      FuseStart(cow1, cow2)             - starts a fuse
-      FuseClaim()                       - claims fuse result
-      UseItem(id)                       - uses an item
-      ClaimOffline()                    - claims offline earnings
-      SyncEquipped(table)               - syncs equipped cow list
-]]
-
 local Players        = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer    = Players.LocalPlayer
-local PlayerGui      = LocalPlayer:WaitForChild("PlayerGui")
 
--- ─── Filesystem stubs (some executors lack these, Rayfield crashes without them)
-if not isfolder then isfolder = function() return false end end
+-- ─── Filesystem stubs ─────────────────────────────────────────────────────────
+if not isfolder  then isfolder  = function() return false end end
 if not makefolder then makefolder = function() end end
-if not isfile then isfile = function() return false end end
-if not readfile then readfile = function() return "" end end
+if not isfile    then isfile    = function() return false end end
+if not readfile  then readfile  = function() return "" end end
 if not writefile then writefile = function() end end
-if not delfile then delfile = function() end end
+if not delfile   then delfile   = function() end end
 
 -- ─── Load Rayfield ────────────────────────────────────────────────────────────
 local Rayfield = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua"
+    "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua",
+    true
 ))()
 
--- ─── Verified Remote Events ───────────────────────────────────────────────────
-local Shared         = ReplicatedStorage:WaitForChild("Shared")
-local Events         = Shared:WaitForChild("Events")
+-- ─── Remote Setup ─────────────────────────────────────────────────────────────
+local RE  = ReplicatedStorage:WaitForChild("_RemoteEvents")
+local RF  = ReplicatedStorage:WaitForChild("_RemoteFunctions")
 
-local DataUpdate     = Events:WaitForChild("DataUpdate")
-local AddCow         = Events:WaitForChild("AddCow")
-local SellMilk       = Events:WaitForChild("SellMilk")
-local GetMilkPrice   = Events:WaitForChild("GetMilkPrice")
-local MerchantBuy    = Events:WaitForChild("MerchantBuy")
-local PurchaseSkill  = Events:WaitForChild("PurchaseSkill")
-local GetSkillTreeData = Events:WaitForChild("GetSkillTreeData")
-local SyncEquipped   = Events:WaitForChild("SyncEquipped")
-local Rebirth        = Events:WaitForChild("Rebirth")
-local GetRebirthInfo = Events:WaitForChild("GetRebirthInfo")
-local SetSettings    = Events:WaitForChild("SetSettings")
-local FuseStart      = Events:WaitForChild("FuseStart")
-local FuseClaim      = Events:WaitForChild("FuseClaim")
-local UseItem        = Events:WaitForChild("UseItem")
-local ClaimOffline   = Events:WaitForChild("ClaimOffline")
-local UnlockBiome    = Events:WaitForChild("UnlockBiome")
+local RequestCardSpin       = RE:WaitForChild("RequestCardSpin")
+local SetAutoRollState      = RE:WaitForChild("SetAutoRollState")
+local UpdateSettings        = RE:WaitForChild("UpdateSettings")
+local CardSpinResult        = RE:WaitForChild("CardSpinResult")
+local BattleEnd             = RE:WaitForChild("BattleEnd")
+local BattleVersus          = RE:WaitForChild("BattleVersus")
+local DebugStartBattle      = RE:WaitForChild("DebugStartBattle")
+local ClaimQuestReward      = RE:WaitForChild("ClaimQuestReward")
+local ClaimAllQuestsReward  = RE:WaitForChild("ClaimAllQuestsReward")
+local RequestEquipCard      = RE:WaitForChild("RequestEquipCard")
+local RequestUnequipCard    = RE:WaitForChild("RequestUnequipCard")
+local InventoryUpdated      = RE:WaitForChild("InventoryUpdated")
+local RequestEquipRelic     = RE:WaitForChild("RequestEquipRelic")
+local RequestEquipTalisman  = RE:WaitForChild("RequestEquipTalisman")
+local UseItemSecure         = RE:WaitForChild("UseItemSecure")
+local RaidPartyCreate       = RE:FindFirstChild("RaidPartyCreate") or RE:WaitForChild("RaidPartyCreate", 5)
+local RaidPartyReady        = RE:FindFirstChild("RaidPartyReady") or RE:WaitForChild("RaidPartyReady", 5)
+local RaidPartyUpdate       = RE:FindFirstChild("RaidPartyUpdate") or RE:WaitForChild("RaidPartyUpdate", 5)
+local RaidPartyStarted      = RE:FindFirstChild("RaidPartyStarted") or RE:WaitForChild("RaidPartyStarted", 5)
 
--- ─── Biome Gate Config ───────────────────────────────────────────────────────
--- Inlined from BiomeGateConfig.lua (in order)
-local BIOME_GATES = {
-    { biomeId="Biome 2",  biomeName="Desert",       cost=5000 },
-    { biomeId="Biome 3",  biomeName="Tundra",        cost=25000 },
-    { biomeId="Biome 4",  biomeName="Volcano",       cost=75000 },
-    { biomeId="Biome 5",  biomeName="Blossom",       cost=300000 },
-    { biomeId="Biome 6",  biomeName="Swamp",         cost=1200000 },
-    { biomeId="Biome 7",  biomeName="Crystal Cave",  cost=4200000 },
-    { biomeId="Biome 8",  biomeName="Savanna",       cost=21000000 },
-    { biomeId="Biome 9",  biomeName="Arctic",        cost=63000000 },
-    { biomeId="Biome 10", biomeName="Mushroom",      cost=285000000 },
-    { biomeId="Biome 11", biomeName="Jungle",        cost=1000000000 },
-    { biomeId="Biome 12", biomeName="Wild West",     cost=4000000000 },
-    { biomeId="Biome 13", biomeName="Autumn",        cost=20000000000 },
-    { biomeId="Biome 14", biomeName="Haunted",       cost=60000000000 },
-    { biomeId="Biome 15", biomeName="Coral Reef",    cost=270000000000 },
-    { biomeId="Biome 16", biomeName="Meteor",        cost=950000000000 },
+local RequestPlayerCards    = RF:WaitForChild("RequestPlayerCards")
+local RequestPartyData      = RF:WaitForChild("RequestPartyData")
+local RequestBossBattle     = RF:FindFirstChild("RequestBossBattle") or RF:WaitForChild("RequestBossBattle", 5)
+local GetPlayerSettings     = RF:FindFirstChild("GetPlayerSettings") or RF:WaitForChild("GetPlayerSettings", 5)
+local TeleportEvent         = ReplicatedStorage:FindFirstChild("TeleportEvent")
+
+-- ─── Card Data (inlined from CardData.lua) ────────────────────────────────────
+-- Maps cardId -> {Damage=n, HP=n, RarityNumber=n, Name=string}
+local CARD_DATA = {
+    slime               = {Name="Skeleton",            Damage=6,    HP=12,    RarityNumber=1},
+    zumbi               = {Name="Zombie",              Damage=7,    HP=14,    RarityNumber=2},
+    bandido             = {Name="Bandit",              Damage=8,    HP=16,    RarityNumber=3},
+    hollow              = {Name="Hollow",              Damage=9,    HP=18,    RarityNumber=5},
+    nailmaster          = {Name="Nail Master",         Damage=11,   HP=22,    RarityNumber=10},
+    wild_prodigy        = {Name="Wild Prodigy",        Damage=15,   HP=30,    RarityNumber=25},
+    stone_scientist     = {Name="Stone Scientist",     Damage=20,   HP=40,    RarityNumber=50},
+    shadow_summoner     = {Name="Shadow Summoner",     Damage=26,   HP=52,    RarityNumber=75},
+    frost_witch         = {Name="Frost Witch",         Damage=37,   HP=75,    RarityNumber=100},
+    explosive_artist    = {Name="Explosive Artist",    Damage=43,   HP=86,    RarityNumber=125},
+    thorfinn            = {Name="Vengeful Viking",     Damage=46,   HP=92,    RarityNumber=150},
+    copy_ninja          = {Name="Copy Ninja",          Damage=65,   HP=130,   RarityNumber=350},
+    rift_demon          = {Name="Rift Demon",          Damage=50,   HP=101,   RarityNumber=200},
+    rimuru_sage         = {Name="Great Sage",          Damage=56,   HP=113,   RarityNumber=250},
+    illusory_monarch    = {Name="Illusory Monarch",    Damage=94,   HP=188,   RarityNumber=750},
+    luffy               = {Name="Straw Hat",           Damage=70,   HP=140,   RarityNumber=400},
+    naruto              = {Name="Nine-Tails Jinchuriki",Damage=80,  HP=160,   RarityNumber=500},
+    final_commander     = {Name="Final Commander",     Damage=80,   HP=160,   RarityNumber=500},
+    goku                = {Name="Saiyan Warrior",      Damage=100,  HP=200,   RarityNumber=900},
+    king_of_heroes      = {Name="King of Heroes",      Damage=125,  HP=251,   RarityNumber=1500},
+    tanjiro             = {Name="Demon Slayer",        Damage=135,  HP=270,   RarityNumber=1500},
+    hollowed_champion   = {Name="Hollowed Champion",   Damage=135,  HP=270,   RarityNumber=2000},
+    natsu               = {Name="Fire Dragon Slayer",  Damage=175,  HP=350,   RarityNumber=2500},
+    killua              = {Name="Lightning Assassin",  Damage=190,  HP=380,   RarityNumber=3000},
+    boulder_guy         = {Name="Boulder Guy",         Damage=205,  HP=410,   RarityNumber=3500},
+    arthur_leywin       = {Name="Ascendant King",      Damage=140,  HP=280,   RarityNumber=1800},
+    shadow_weaver       = {Name="Shadow Weaver",       Damage=210,  HP=420,   RarityNumber=5000},
+    gojo                = {Name="The Honored One",     Damage=190,  HP=380,   RarityNumber=4500},
+    sukuna              = {Name="King of Curses",      Damage=220,  HP=440,   RarityNumber=6000},
+    swift_ackerman      = {Name="Swift Ackerman",      Damage=235,  HP=470,   RarityNumber=5500},
+    sleepy_swordsman    = {Name="Sleepy Swordsman",    Damage=250,  HP=500,   RarityNumber=6500},
+    egotistic_saiyan    = {Name="Egotistic Saiyan",    Damage=265,  HP=530,   RarityNumber=7000},
+    genius_detective    = {Name="Genius Detective",    Damage=330,  HP=660,   RarityNumber=9000},
+    tokito              = {Name="Mist Hashira",        Damage=350,  HP=700,   RarityNumber=10000},
+    denji               = {Name="Chainsaw Man",        Damage=430,  HP=860,   RarityNumber=15000},
+    saitama             = {Name="Caped Baldy",         Damage=500,  HP=1000,  RarityNumber=20000},
+    sakura              = {Name="Kunoichi Healer",     Damage=550,  HP=1100,  RarityNumber=25000},
+    guido_mista         = {Name="Sixfold Gunner",      Damage=560,  HP=1120,  RarityNumber=30000},
+    isagi_ego_striker   = {Name="Ego Striker",         Damage=610,  HP=1220,  RarityNumber=35000},
+    thorkell_ruthless   = {Name="Ruthless Fighter",    Damage=700,  HP=1400,  RarityNumber=40000},
+    ace_flame_fist      = {Name="Flame Fist",          Damage=980,  HP=1960,  RarityNumber=60000},
+    inoue_orihime       = {Name="Radiant Protector",   Damage=1100, HP=2200,  RarityNumber=70000},
+    sinbad_king_conquest= {Name="King of Conquest",    Damage=1500, HP=3000,  RarityNumber=100000},
+    hidan_jashin_vessel = {Name="Jashin's Vessel",     Damage=830,  HP=1660,  RarityNumber=50000},
+    hakari_dice_king    = {Name="Dice King",           Damage=1650, HP=3300,  RarityNumber=125000},
+    chiikawa_ravaging_beast={Name="Ravaging Beast",    Damage=1850, HP=3700,  RarityNumber=175000},
+    beast_titan_primal  = {Name="Primal Commander",    Damage=2000, HP=4000,  RarityNumber=200000},
+    eren_freedom_shifter= {Name="Freedom Shifter",     Damage=2200, HP=4400,  RarityNumber=250000},
+    escanor_prideful_sin= {Name="Prideful Sin",        Damage=2350, HP=4700,  RarityNumber=300000},
+    jojo_kira           = {Name="Silent Killer",       Damage=2050, HP=4100,  RarityNumber=320000},
+    jojo_valentine      = {Name="Dimensional President",Damage=2250,HP=4500,  RarityNumber=410000},
+    jojo_weather_report = {Name="Storm Caller",        Damage=2450, HP=4900,  RarityNumber=520000},
+    jojo_diavolo        = {Name="Crimson Fate",        Damage=2650, HP=5300,  RarityNumber=680000},
+    jojo_tooru          = {Name="Calamity Incarnate",  Damage=2900, HP=5800,  RarityNumber=900000},
+    adam_humanity_hope  = {Name="Humanity's Hope",     Damage=3050, HP=6100,  RarityNumber=1150000},
+    alladin_magic_prodigy={Name="Magic Prodigy",       Damage=3400, HP=6800,  RarityNumber=750000},
+    megumin_crimson_mage= {Name="Crimson Mage",        Damage=2750, HP=5500,  RarityNumber=500000},
+    saber_sword_empress = {Name="Sword Empress",       Damage=2050, HP=4100,  RarityNumber=250000},
 }
 
--- ─── Game Config ──────────────────────────────────────────────────────────────
--- Inlined from SkillTreeConfig.lua (can't use require() in executor context)
--- Format: { id, branch, prereq={}, cost={Money=n, TotalRolls=n} }
-local SKILL_NODES = {
-    {id="loot_open",  branch="Loot",      prereq={},            cost={Money=0}},
-    {id="auto_roll",  branch="Speed",     prereq={"loot_open"}, cost={Money=500}},
-    {id="equip_1",    branch="Equip",     prereq={"loot_open"}, cost={Money=250}},
-    {id="equip_2",    branch="Equip",     prereq={"equip_1"},   cost={Money=5000}},
-    {id="luck_1",     branch="Luck",      prereq={"auto_roll"}, cost={Money=2000}},
-    {id="luck_2",     branch="Luck",      prereq={"luck_1"},    cost={Money=5000}},
-    {id="luck_3",     branch="Luck",      prereq={"luck_2"},    cost={Money=12000}},
-    {id="luck_4",     branch="SuperLuck", prereq={"luck_3"},    cost={Money=28000}},
-    {id="luck_5",     branch="SuperLuck", prereq={"luck_4"},    cost={Money=65000}},
-    {id="luck_6",     branch="SuperLuck", prereq={"luck_5"},    cost={Money=150000}},
-    {id="luck_7",     branch="SuperLuck", prereq={"luck_6"},    cost={Money=350000}},
-    {id="luck_8",     branch="SuperLuck", prereq={"luck_7"},    cost={Money=800000}},
-    {id="luck_9",     branch="SuperLuck", prereq={"luck_8"},    cost={Money=1800000}},
-    {id="luck_10",    branch="SuperLuck", prereq={"luck_9"},    cost={Money=4000000}},
-    {id="luck_11",    branch="SuperLuck", prereq={"luck_10"},   cost={Money=9000000}},
-    {id="luck_12",    branch="SuperLuck", prereq={"luck_11"},   cost={Money=20000000}},
-    {id="luck_13",    branch="SuperLuck", prereq={"luck_12"},   cost={Money=45000000}},
-    {id="luck_14",    branch="SuperLuck", prereq={"luck_13"},   cost={Money=100000000}},
-    {id="luck_15",    branch="SuperLuck", prereq={"luck_14"},   cost={Money=220000000}},
-    {id="luck_16",    branch="SuperLuck", prereq={"luck_15"},   cost={Money=500000000}},
-    {id="luck_17",    branch="SuperLuck", prereq={"luck_16"},   cost={Money=1100000000}},
-    {id="luck_18",    branch="SuperLuck", prereq={"luck_17"},   cost={Money=2500000000}},
-    {id="luck_19",    branch="SuperLuck", prereq={"luck_18"},   cost={Money=6000000000}},
-    {id="luck_20",    branch="SuperLuck", prereq={"luck_19"},   cost={Money=15000000000}},
-    {id="speed_1",    branch="Speed",     prereq={"auto_roll"}, cost={TotalRolls=100}},
-    {id="speed_2",    branch="Speed",     prereq={"speed_1"},   cost={TotalRolls=500}},
-    {id="speed_3",    branch="Speed",     prereq={"speed_2"},   cost={TotalRolls=2000}},
-    {id="speed_4",    branch="Speed",     prereq={"speed_3"},   cost={TotalRolls=10000}},
-    {id="friend_luck_1",  branch="Friend", prereq={"luck_2"},          cost={Money=1500}},
-    {id="friend_luck_2",  branch="Friend", prereq={"friend_luck_1"},   cost={Money=5000}},
-    {id="friend_luck_3",  branch="Friend", prereq={"friend_luck_2"},   cost={Money=15000}},
-    {id="friend_luck_4",  branch="Friend", prereq={"friend_luck_3"},   cost={Money=40000}},
-    {id="friend_luck_5",  branch="Friend", prereq={"friend_luck_4"},   cost={Money=100000}},
-    {id="friend_luck_6",  branch="Friend", prereq={"friend_luck_5"},   cost={Money=300000}},
-    {id="friend_luck_7",  branch="Friend", prereq={"friend_luck_6"},   cost={Money=800000}},
-    {id="friend_luck_8",  branch="Friend", prereq={"friend_luck_7"},   cost={Money=2500000}},
-    {id="friend_luck_9",  branch="Friend", prereq={"friend_luck_8"},   cost={Money=7500000}},
-    {id="friend_luck_10", branch="Friend", prereq={"friend_luck_9"},   cost={Money=25000000}},
-    {id="friend_luck_11", branch="Friend", prereq={"friend_luck_10"},  cost={Money=80000000}},
-    {id="friend_luck_12", branch="Friend", prereq={"friend_luck_11"},  cost={Money=250000000}},
-    {id="mut_wet",      branch="Mutation", prereq={"loot_unlock"}, cost={Money=5000}},
-    {id="mut_thick",    branch="Mutation", prereq={"mut_wet"},     cost={Money=15000}},
-    {id="mut_sweet",    branch="Mutation", prereq={"mut_thick"},   cost={Money=50000}},
-    {id="mut_golden",   branch="Mutation", prereq={"mut_sweet"},   cost={Money=200000}},
-    {id="mut_crystal",  branch="Mutation", prereq={"mut_golden"},  cost={Money=1500000}},
-    {id="mut_toxic",    branch="Mutation", prereq={"mut_crystal"},  cost={Money=15000000}},
-    {id="mut_frozen",   branch="Mutation", prereq={"mut_toxic"},   cost={Money=150000000}},
-    {id="mut_void",     branch="Mutation", prereq={"mut_frozen"},  cost={Money=2000000000}},
-    {id="mut_rainbow",  branch="Mutation", prereq={"mut_void"},    cost={Money=30000000000}},
-    {id="mut_celestial",branch="Mutation", prereq={"mut_rainbow"}, cost={Money=500000000000}},
-}
+local BORDER_MULT = {Normal = 1, Gold = 4, Rainbow = 16, Mythical = 64}
+do
+    local okCard, cardModule = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("_Modules"):WaitForChild("CardData"))
+    end)
+    if okCard and type(cardModule) == "table" and type(cardModule.Cards) == "table" then
+        CARD_DATA = cardModule.Cards
+    end
 
-local CowSimulatorGui = PlayerGui:WaitForChild("CowSimulatorGui")
-
--- All cow names + rarity index from CowData.lua (verified)
--- Format: { name, rarityIndex }
-local ALL_COWS = {
-    {"Bamboo",1},{"Choco",1},{"Ivy",2},{"Mushy",2},{"Camo",2},{"Scriblo",2},
-    {"Reefy",3},{"Minty",3},{"Buzzly",3},{"Moss",3},{"Frosty",4},{"Jackmoo",4},
-    {"Medic",4},{"Citrush",4},{"Poppy",4},{"Voltmo",5},{"Puffy",5},{"Bloomsy",5},
-    {"Voltix",6},{"Sweeto",6},{"Sakury",6},{"Obsy",6},{"Arcanox",7},{"Bugzo",7},
-    {"Hexmoo",7},{"Voidor",8},{"Splashy",8},{"Mecha",8},{"Magmoo",8},{"Jelly",8},
-    {"Grimoo",8},{"Glowbyte",9},{"Hornox",9},{"Toxsy",9},{"Corruptor",9},
-    {"Bloodfang",10},{"Dracox",10},{"Matrix",10},{"Vexoo",10},{"Wake",11},
-    {"Solar",11},{"Boo",11},{"Chrono",11},{"Nullix",11},{"Hexie",12},
-    {"Parasite",12},{"Sprazy",12},{"Toy",13},{"Ronin",13},{"Xenmoo",13},
-    {"Diavox",14},{"Reaper",14},
-}
-
--- Build name-only list for dropdown
-local COW_NAMES = {}
-for _, v in ipairs(ALL_COWS) do
-    table.insert(COW_NAMES, v[1])
+    local okBorder, borderModule = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("_Modules"):WaitForChild("BorderData"))
+    end)
+    if okBorder and type(borderModule) == "table" and type(borderModule.Borders) == "table" then
+        for border, info in pairs(borderModule.Borders) do
+            BORDER_MULT[border] = tonumber(info.Multiplier) or BORDER_MULT[border] or 1
+        end
+    end
 end
-
--- Build lookup: name -> rarityIndex
-local COW_RARITY = {}
-for _, v in ipairs(ALL_COWS) do
-    COW_RARITY[v[1]] = v[2]
-end
-
--- Priority skill branches for smart upgrades (from SkillTreeConfig.lua)
-local PRIORITY_BRANCHES = { Luck=true, SuperLuck=true, Speed=true, Milk=true }
 
 -- ─── State ────────────────────────────────────────────────────────────────────
-local State = {
-    Money        = 0,
-    Milk         = 0,
-    Rolls        = 0,
-    MilkPrice       = 1,
-    MerchantData    = nil,
-    UnlockedBiomes  = {},
-    Effects         = {},
-    PendingBiomeUnlock = nil,
-    LastActivity    = tick(),
+local Cfg = {
+    AutoRoll        = false,
+    FastRoll        = false,
+    AutoBattle      = false,
+    SmartBattle     = true,
+    SmartSafety     = 0.85,
+    AutoBoss        = false,
+    BossId          = "panther_espada",
+    AutoRaid        = false,
+    RaidBossId      = "Divine General",
+    RaidDifficulty  = "Easy",
+    TeleportFallback = true,
+    TeleportBeforeBattle = true,
+    BossStartDistance = 35,
+    AutoWorldBosses = false,
+    AutoClaimQuests = false,
+    AutoEquipBest   = false,
+    EquipMode       = "ATK",      -- "ATK", "HP", "BALANCED"
+    BattleCardId    = "slime",    -- enemy card ID for auto battle
+    BattleEnemyCount = 1,
 }
 
-local LastLog = {}
+local State = {
+    InBattle        = false,
+    InRaidParty     = false,
+    OwnedCards      = {},         -- {cardId = {Total=n, Borders={Normal=n}, BestBorder=string}}
+    LastBattleTime  = 0,
+    LastBossTime    = 0,
+    LastRaidTime    = 0,
+    ActiveBossId    = nil,
+    ActiveWorldStage = nil,
+    LastBossResult  = nil,
+    LastBossDefeated = nil,
+    LastWorldStageResult = nil,
+    WorldBossIndex  = 1,
+    WorldEnemyCleared = {},
+}
+
+-- ─── Helpers ──────────────────────────────────────────────────────────────────
+local _logThrottle = {}
 local function logEvery(key, msg, interval)
     local now = tick()
-    if not LastLog[key] or now - LastLog[key] >= (interval or 15) then
-        LastLog[key] = now
-        print("[HatchCowsAuto] " .. msg)
+    if not _logThrottle[key] or now - _logThrottle[key] >= interval then
+        _logThrottle[key] = now
+        print("[AnimeCardAuto] " .. msg)
     end
 end
 
-local function clickButton(button)
-    if not button then return false end
-    local ok = false
-    if firesignal then
-        ok = pcall(function()
-            firesignal(button.MouseButton1Click)
+local function syncOwnedCards()
+    local ok, data = pcall(function() return RequestPlayerCards:InvokeServer() end)
+    if ok and type(data) == "table" then
+        State.OwnedCards = {}
+        for _, entry in ipairs(data) do
+            if type(entry) == "table" and entry.CardId then
+                State.OwnedCards[entry.CardId] = true
+            elseif type(entry) == "string" then
+                State.OwnedCards[entry] = true
+            end
+        end
+        return true
+    end
+    return false
+end
+
+-- ─── Best Deck Builder ────────────────────────────────────────────────────────
+-- Picks top 4 owned cards by mode: ATK = highest Damage, HP = highest HP, BALANCED = highest Damage+HP
+local function getBestDeck(mode)
+    local owned = {}
+    for id, data in pairs(CARD_DATA) do
+        if State.OwnedCards[id] then
+            table.insert(owned, {id = id, data = data})
+        end
+    end
+    table.sort(owned, function(a, b)
+        if mode == "ATK" then
+            return a.data.Damage > b.data.Damage
+        elseif mode == "HP" then
+            return a.data.HP > b.data.HP
+        else -- BALANCED
+            return (a.data.Damage + a.data.HP) > (b.data.Damage + b.data.HP)
+        end
+    end)
+    local deck = {}
+    for i = 1, math.min(4, #owned) do
+        table.insert(deck, owned[i].id)
+    end
+    return deck
+end
+
+local function equipBestDeck()
+    syncOwnedCards()
+    local deck = getBestDeck(Cfg.EquipMode)
+    if #deck == 0 then
+        print("[AnimeCardAuto] Auto Equip Best: no owned cards found in CardData yet")
+        return
+    end
+    local ok2, party = pcall(function() return RequestPartyData:InvokeServer() end)
+    local currentSlots = {}
+    if ok2 and type(party) == "table" then
+        for slot, id in pairs(party) do
+            currentSlots[slot] = id
+        end
+    end
+    for slot = 1, 4 do
+        local current = currentSlots[slot]
+        local desired = deck[slot]
+        if desired and current ~= desired then
+            if current then
+                pcall(function() RequestUnequipCard:FireServer(slot) end)
+                task.wait(0.2)
+            end
+            pcall(function() RequestEquipCard:FireServer(desired, slot) end)
+            task.wait(0.2)
+            print(string.format("[AnimeCardAuto] Equipped slot %d: %s (%s mode)", slot, CARD_DATA[desired] and CARD_DATA[desired].Name or desired, Cfg.EquipMode))
+        end
+    end
+end
+
+-- Runtime-aware collection/deck helpers. These shadow the first draft above and
+-- match the server response shape: "cardId:Border" -> {Amount = n}.
+local function splitCardKey(key)
+    local cardId, border = tostring(key):match("^([^:]+):(.+)$")
+    if cardId then
+        return string.lower(cardId), tostring(border)
+    end
+    return string.lower(tostring(key)), "Normal"
+end
+
+local function addOwnedCard(cardId, border, amount)
+    cardId = string.lower(tostring(cardId or ""))
+    if cardId == "" then return end
+    border = tostring(border or "Normal")
+    amount = math.max(1, math.floor(tonumber(amount) or 1))
+    local entry = State.OwnedCards[cardId] or {Total = 0, Borders = {}, BestBorder = "Normal"}
+    entry.Total = entry.Total + amount
+    entry.Borders[border] = (entry.Borders[border] or 0) + amount
+    if (BORDER_MULT[border] or 1) > (BORDER_MULT[entry.BestBorder] or 1) then
+        entry.BestBorder = border
+    end
+    State.OwnedCards[cardId] = entry
+end
+
+local function syncOwnedCards()
+    local ok, data = pcall(function() return RequestPlayerCards:InvokeServer() end)
+    if ok and type(data) == "table" then
+        State.OwnedCards = {}
+        for key, entry in pairs(data) do
+            if type(key) == "string" then
+                local cardId, border = splitCardKey(key)
+                local amount = type(entry) == "table" and entry.Amount or entry
+                addOwnedCard(cardId, border, amount)
+            elseif type(entry) == "table" and entry.CardId then
+                addOwnedCard(entry.CardId, entry.Border or "Normal", entry.Amount or 1)
+            elseif type(entry) == "string" then
+                addOwnedCard(entry, "Normal", 1)
+            end
+        end
+        return true
+    end
+    return false
+end
+
+local function cardScore(cardId, mode, border)
+    local data = CARD_DATA[string.lower(tostring(cardId or ""))]
+    if not data then return 0 end
+    local mult = BORDER_MULT[border or "Normal"] or 1
+    local dmg = tonumber(data.Damage) or 0
+    local hp = tonumber(data.HP) or 0
+    if dmg <= 0 and hp <= 0 then
+        local rarity = tonumber(data.RarityNumber) or 0
+        dmg = rarity / 1000
+        hp = rarity / 500
+    end
+    if mode == "ATK" then
+        return dmg * mult
+    elseif mode == "HP" then
+        return hp * mult
+    end
+    return (dmg + hp) * mult
+end
+
+local function getPartySlots()
+    local ok, party = pcall(function() return RequestPartyData:InvokeServer() end)
+    local slots = {}
+    if ok and type(party) == "table" then
+        for i, entry in pairs(party) do
+            if type(entry) == "table" then
+                local slot = math.floor(tonumber(entry.SlotIndex) or tonumber(i) or 0)
+                if slot >= 1 and slot <= 4 then
+                    slots[slot] = {
+                        id = string.lower(tostring(entry.CardId or "")),
+                        border = tostring(entry.Border or "Normal")
+                    }
+                end
+            elseif type(entry) == "string" then
+                local slot = math.floor(tonumber(i) or 0)
+                if slot >= 1 and slot <= 4 then
+                    slots[slot] = {id = string.lower(entry), border = "Normal"}
+                end
+            end
+        end
+    end
+    return slots
+end
+
+local function getBestDeck(mode)
+    local owned = {}
+    for id, ownedEntry in pairs(State.OwnedCards) do
+        if CARD_DATA[id] and ownedEntry.Total and ownedEntry.Total > 0 then
+            local border = ownedEntry.BestBorder or "Normal"
+            table.insert(owned, {
+                id = id,
+                border = border,
+                score = cardScore(id, mode, border)
+            })
+        end
+    end
+    table.sort(owned, function(a, b) return a.score > b.score end)
+    local deck = {}
+    for i = 1, math.min(4, #owned) do
+        table.insert(deck, owned[i])
+    end
+    return deck
+end
+
+local function getPartyPower()
+    local total = 0
+    for _, entry in pairs(getPartySlots()) do
+        total = total + cardScore(entry.id, "BALANCED", entry.border)
+    end
+    if total > 0 then return total end
+    syncOwnedCards()
+    for _, entry in ipairs(getBestDeck("BALANCED")) do
+        total = total + entry.score
+    end
+    return total
+end
+
+local function equipBestDeck()
+    syncOwnedCards()
+    local deck = getBestDeck(Cfg.EquipMode)
+    if #deck == 0 then
+        print("[AnimeCardAuto] Auto Equip Best: no owned cards found in CardData yet")
+        return
+    end
+    local currentSlots = getPartySlots()
+    for slot = 1, 4 do
+        local current = currentSlots[slot]
+        local desired = deck[slot]
+        if desired and (not current or current.id ~= desired.id or current.border ~= desired.border) then
+            if current then
+                pcall(function() RequestUnequipCard:FireServer(slot) end)
+                task.wait(0.2)
+            end
+            pcall(function() RequestEquipCard:FireServer(desired.id, desired.border, slot) end)
+            task.wait(0.2)
+            local name = CARD_DATA[desired.id] and CARD_DATA[desired.id].Name or desired.id
+            print(string.format("[AnimeCardAuto] Equipped slot %d: %s [%s] (%s mode)", slot, name, desired.border, Cfg.EquipMode))
+        end
+    end
+end
+
+-- ─── Auto Roll ────────────────────────────────────────────────────────────────
+-- SetAutoRollState:FireServer(true) mirrors clicking the Auto toggle in-game
+task.spawn(function()
+    while task.wait(1) do
+        if not Cfg.AutoRoll then continue end
+        local ok, err = pcall(function()
+            SetAutoRollState:FireServer(true)
+        end)
+        if not ok then
+            logEvery("autoroll_err", "SetAutoRollState error: " .. tostring(err), 10)
+        end
+    end
+end)
+
+-- ─── Auto Roll OFF when toggled off ──────────────────────────────────────────
+-- We track previous state to turn server-side auto-roll off cleanly
+local _prevAutoRoll = false
+task.spawn(function()
+    while task.wait(0.5) do
+        if _prevAutoRoll and not Cfg.AutoRoll then
+            pcall(function() SetAutoRollState:FireServer(false) end)
+        end
+        _prevAutoRoll = Cfg.AutoRoll
+    end
+end)
+
+-- ─── Fast Roll toggle ────────────────────────────────────────────────────────
+local _prevFastRoll = false
+task.spawn(function()
+    while task.wait(0.5) do
+        if Cfg.FastRoll ~= _prevFastRoll then
+            pcall(function() UpdateSettings:FireServer("SkipRollAnimation", Cfg.FastRoll) end)
+            _prevFastRoll = Cfg.FastRoll
+        end
+    end
+end)
+
+-- ─── Auto Battle ─────────────────────────────────────────────────────────────
+-- DebugStartBattle:FireServer({cardIds}) confirmed in EnemyTeam/Frame/LocalScript.client.lua:119
+-- BattleEnd.OnClientEvent fires when battle ends - we restart after checking result.
+local teleportToBattleTarget
+BattleEnd.OnClientEvent:Connect(function(result)
+    State.InBattle = false
+    State.LastBattleTime = tick()
+    State.LastBattleResult = tostring(result or "Unknown")
+    local completedBossId = State.ActiveBossId
+    local completedStage = State.ActiveWorldStage
+    State.ActiveBossId = nil
+    State.ActiveWorldStage = nil
+    if completedStage and completedStage.Kind == "enemy" then
+        local won = State.LastBattleResult ~= "Defeat"
+        State.LastWorldStageResult = State.LastBattleResult
+        if won then
+            State.WorldEnemyCleared[completedStage.Key] = true
+        end
+        logEvery("world_enemy_end", "World enemy ended: " .. tostring(completedStage.Key) .. " result=" .. State.LastBattleResult .. " cleared=" .. tostring(won), 1)
+    end
+    if completedBossId then
+        task.spawn(function()
+            task.wait(1)
+            local defeated = false
+            local ok, settings = pcall(function()
+                return GetPlayerSettings and GetPlayerSettings:InvokeServer() or nil
+            end)
+            if ok and type(settings) == "table" and type(settings.DefeatedBosses) == "table" then
+                defeated = settings.DefeatedBosses[completedBossId] == true
+                    or (completedBossId == "ulmiorra" and settings.DefeatedBosses.ulquiorra == true)
+            end
+            State.LastBossResult = State.LastBattleResult
+            State.LastBossDefeated = defeated
+            logEvery("boss_end", "Boss ended: " .. completedBossId .. " result=" .. State.LastBattleResult .. " defeated=" .. tostring(defeated), 1)
         end)
     end
-    if not ok then
-        ok = pcall(function()
-            button:Activate()
+    logEvery("battle_end", "Battle ended: " .. State.LastBattleResult, 1)
+end)
+
+BattleVersus.OnClientEvent:Connect(function()
+    State.InBattle = true
+    logEvery("battle_start", "Battle started", 1)
+end)
+
+local function chooseSmartEnemy(count)
+    if not Cfg.SmartBattle then
+        return Cfg.BattleCardId
+    end
+    local power = getPartyPower()
+    if power <= 0 then
+        return Cfg.BattleCardId
+    end
+    local limit = power * math.clamp(tonumber(Cfg.SmartSafety) or 0.85, 0.1, 2)
+    local bestId, bestScore = Cfg.BattleCardId, 0
+    for id, data in pairs(CARD_DATA) do
+        if type(id) == "string" and type(data) == "table" then
+            local hasStats = (tonumber(data.Damage) or 0) > 0 or (tonumber(data.HP) or 0) > 0
+            local score = cardScore(id, "BALANCED", "Normal") * count
+            if hasStats and score > bestScore and score <= limit then
+                bestId = id
+                bestScore = score
+            end
+        end
+    end
+    if bestId ~= Cfg.BattleCardId then
+        logEvery("smart_enemy", "Smart enemy selected " .. bestId .. " for party power " .. math.floor(power), 5)
+    end
+    return bestId
+end
+
+task.spawn(function()
+    while task.wait(2) do
+        if not Cfg.AutoBattle then continue end
+        if State.InBattle then
+            logEvery("battle_waiting", "In battle, waiting...", 10)
+            continue
+        end
+        local gap = tick() - State.LastBattleTime
+        if gap < 1.5 then task.wait(1.5 - gap) end
+        local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
+        local enemies = {}
+        local enemyId = chooseSmartEnemy(count)
+        for i = 1, count do
+            enemies[i] = enemyId
+        end
+        local tpOk, tpMsg = teleportToBattleTarget(enemyId, false)
+        if not tpOk then
+            logEvery("enemy_tp_missing", "Could not find live enemy model for " .. tostring(enemyId) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
+        end
+        local ok, err = pcall(function()
+            DebugStartBattle:FireServer(enemies)
         end)
+        if ok then
+            State.InBattle = true
+            logEvery("battle_fired", "Auto Battle started vs " .. count .. "x " .. enemyId, 2)
+        else
+            logEvery("battle_err", "DebugStartBattle error: " .. tostring(err), 5)
+        end
     end
-    return ok
-end
+end)
 
-local function firstOption(value)
-    if type(value) == "table" then
-        return value[1]
-    end
-    return value
-end
-
--- ─── Config Flags ─────────────────────────────────────────────────────────────
-local Cfg = {
-    AutoHatch      = false,
-    AutoSell       = false,
-    SellThreshold  = 10,
-    AutoMerchant   = false,
-    MerchantItem   = "CheesePack",
-    AutoUpgrades   = false,
-    SmartUpgrades  = true,
-    AutoEquipBest  = false,
-    AutoRebirth    = false,
-    AntiAFK        = false,
-    AutoUnlockBiome = false,
-    -- Spawn cow settings
-    SelectedCow    = "Reaper",
+local BOSS_MAP = {
+    panther_espada = "Hueco",
+    ulmiorra = "Hueco",
+    itadori_yuji = "Shibuya",
+    mahito = "Shibuya",
+    toji_fushiguro = "Shibuya",
+    jogo = "Shibuya",
+    sasuke_ms = "Naruto",
+    itachi_akatsuki = "Naruto",
+    madara_edo = "Naruto",
+    bio_android_incomplete = "Cell",
+    whitebeard_worldbreaker = "Marine",
+    aokiji_frost_admiral = "Marine",
+    kizaru_light_admiral = "Marine",
+    akainu_infernal_judgement = "Marine",
 }
 
--- ─── Data Tracking ────────────────────────────────────────────────────────────
-local function applyData(data)
-    if type(data) ~= "table" then return end
-    if data.Money      ~= nil then State.Money        = data.Money end
-    if data.Milk       ~= nil then State.Milk         = data.Milk  end
-    if data.TotalRolls ~= nil then State.Rolls        = data.TotalRolls end
-    if data.Merchant        ~= nil then State.MerchantData    = data.Merchant end
-    if data.UnlockedBiomes  ~= nil then State.UnlockedBiomes = data.UnlockedBiomes end
-    if data.Effects         ~= nil then State.Effects = data.Effects end
-    State.LastActivity = tick()
+local BOSS_MODEL_NAMES = {
+    panther_espada = {"Grimmjow", "Panther Espada"},
+    ulmiorra = {"Ulmiorra", "Ulquiorra", "Grimmjow"},
+    itadori_yuji = {"Cursed Vessel"},
+    mahito = {"Patchwork Curse"},
+    toji_fushiguro = {"Sorcerer Killer"},
+    jogo = {"Volcanic Curse"},
+    sasuke_ms = {"Sasuke", "Avenging Shinobi"},
+    itachi_akatsuki = {"itachi", "Akatsuki Phantom"},
+    madara_edo = {"madara", "Reanimated Legend"},
+    bio_android_incomplete = {"bio_android_incomplete", "Incomplete Bio-Android"},
+    cyborg_17 = {"cyborg 17", "Cyborg 17"},
+    cyborg_18 = {"cyborg 18", "Cyborg 18"},
+    hidden_prodigy = {"hidden prodigy", "Half-Blood Prodigy"},
+    whitebeard_worldbreaker = {"Worldbreaker"},
+    aokiji_frost_admiral = {"Frost Admiral"},
+    kizaru_light_admiral = {"Light Admiral"},
+    akainu_infernal_judgement = {"Infernal Judgement"},
+}
+
+local WORLD_BOSS_ORDER = {
+    "panther_espada",
+    "ulmiorra",
+    "itadori_yuji",
+    "mahito",
+    "toji_fushiguro",
+    "jogo",
+    "sasuke_ms",
+    "itachi_akatsuki",
+    "madara_edo",
+    "bio_android_incomplete",
+    "whitebeard_worldbreaker",
+    "aokiji_frost_admiral",
+    "kizaru_light_admiral",
+    "akainu_infernal_judgement",
+}
+
+local WORLD_STAGES = {
+    {World = "Hueco", Kind = "boss", BossId = "panther_espada", Label = "Panther Espada"},
+    {World = "Hueco", Kind = "boss", BossId = "ulmiorra", Label = "Ulmiorra"},
+
+    {World = "Shibuya", Kind = "boss", BossId = "itadori_yuji", Label = "Cursed Vessel"},
+    {World = "Shibuya", Kind = "boss", BossId = "mahito", Label = "Patchwork Curse"},
+    {World = "Shibuya", Kind = "boss", BossId = "toji_fushiguro", Label = "Sorcerer Killer"},
+    {World = "Shibuya", Kind = "boss", BossId = "jogo", Label = "Volcanic Curse"},
+
+    {World = "Naruto", Kind = "boss", BossId = "sasuke_ms", Label = "Avenging Shinobi"},
+    {World = "Naruto", Kind = "boss", BossId = "itachi_akatsuki", Label = "Akatsuki Phantom"},
+    {World = "Naruto", Kind = "boss", BossId = "madara_edo", Label = "Reanimated Legend"},
+
+    {World = "Cell", Kind = "boss", BossId = "cyborg_17", Label = "Cyborg 17"},
+    {World = "Cell", Kind = "boss", BossId = "cyborg_18", Label = "Cyborg 18"},
+    {World = "Cell", Kind = "boss", BossId = "hidden_prodigy", Label = "Half-Blood Prodigy"},
+    {World = "Cell", Kind = "enemy", Key = "cell_bio_spawn", EnemyIds = {"bio_spawn", "bio_spawn"}, Label = "Bio-Spawn", SkipIfBossDefeated = "bio_android_incomplete"},
+    {World = "Cell", Kind = "boss", BossId = "bio_android_incomplete", Label = "Incomplete Bio-Android"},
+
+    {World = "Marine", Kind = "boss", BossId = "whitebeard_worldbreaker", Label = "Worldbreaker"},
+    {World = "Marine", Kind = "boss", BossId = "aokiji_frost_admiral", Label = "Frost Admiral"},
+    {World = "Marine", Kind = "boss", BossId = "kizaru_light_admiral", Label = "Light Admiral"},
+    {World = "Marine", Kind = "boss", BossId = "akainu_infernal_judgement", Label = "Infernal Judgement"},
+}
+
+local BOSS_DEFEAT_ALIASES = {
+    ulmiorra = {"ulmiorra", "ulquiorra"},
+    panther_espada = {"panther_espada"},
+    cyborg_17 = {"cyborg_17"},
+    cyborg_18 = {"cyborg_18"},
+    hidden_prodigy = {"hidden_prodigy"},
+}
+
+local function requestTeleport(destination)
+    if Cfg.TeleportFallback and TeleportEvent and type(destination) == "string" and destination ~= "" then
+        pcall(function() TeleportEvent:FireServer(destination) end)
+        task.wait(0.75)
+    end
 end
 
-local function syncData()
-    local ok, data = pcall(function()
-        return GetSkillTreeData:InvokeServer()
+local function normalizeName(value)
+    return string.lower(tostring(value or "")):gsub("[^%w]", "")
+end
+
+local function getRootPart()
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    return character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso")
+end
+
+local function getInstanceCFrame(inst)
+    if not inst then return nil end
+    if inst:IsA("BasePart") then
+        return inst.CFrame
+    end
+    if inst:IsA("Model") then
+        local ok, pivot = pcall(function()
+            return inst:GetPivot()
+        end)
+        if ok and pivot then
+            return pivot
+        end
+    end
+    local part = inst:FindFirstChildWhichIsA("BasePart", true)
+    return part and part.CFrame or nil
+end
+
+local function findTargetByNames(names)
+    if type(names) ~= "table" then
+        names = {names}
+    end
+    local zones = {}
+    local bosses = workspace:FindFirstChild("Bosses")
+    if bosses then table.insert(zones, bosses) end
+    table.insert(zones, workspace)
+
+    for _, zone in ipairs(zones) do
+        for _, name in ipairs(names) do
+            local direct = zone:FindFirstChild(tostring(name))
+            if direct then
+                local cf = getInstanceCFrame(direct)
+                if cf then return direct, cf end
+            end
+        end
+    end
+
+    local wanted = {}
+    for _, name in ipairs(names) do
+        wanted[normalizeName(name)] = true
+    end
+    for _, zone in ipairs(zones) do
+        for _, inst in ipairs(zone:GetDescendants()) do
+            local n = normalizeName(inst.Name)
+            if wanted[n] then
+                local cf = getInstanceCFrame(inst)
+                if cf then return inst, cf end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function getBattleTargetNames(cardId)
+    local names = {cardId}
+    local data = CARD_DATA[string.lower(tostring(cardId or ""))]
+    if data and data.Name then
+        table.insert(names, data.Name)
+    end
+    local bossNames = BOSS_MODEL_NAMES[string.lower(tostring(cardId or ""))]
+    if bossNames then
+        for _, name in ipairs(bossNames) do
+            table.insert(names, name)
+        end
+    end
+    return names
+end
+
+local function teleportToCFrameIfNeeded(cf, label)
+    local root = getRootPart()
+    if not root or not cf then
+        return false, "missing root or target"
+    end
+    local distance = (root.Position - cf.Position).Magnitude
+    if distance <= (tonumber(Cfg.BossStartDistance) or 35) then
+        logEvery("tp_close_" .. tostring(label), "Already close to " .. tostring(label) .. " (" .. math.floor(distance) .. " studs)", 3)
+        return true, "close"
+    end
+    local targetPos = cf.Position
+    local offsetPos = targetPos + Vector3.new(0, 4, 10)
+    root.CFrame = CFrame.lookAt(offsetPos, targetPos)
+    task.wait(0.35)
+    return true, "teleported"
+end
+
+function teleportToBattleTarget(cardId, isBoss)
+    if not Cfg.TeleportBeforeBattle then
+        return true, "disabled"
+    end
+    cardId = string.lower(tostring(cardId or ""))
+    local names = getBattleTargetNames(cardId)
+    local target, cf = findTargetByNames(names)
+    if not target and isBoss then
+        requestTeleport(BOSS_MAP[cardId])
+        task.wait(1.25)
+        target, cf = findTargetByNames(names)
+    end
+    if not cf then
+        return false, "target not found"
+    end
+    return teleportToCFrameIfNeeded(cf, cardId)
+end
+
+local function getDefeatedBosses()
+    local ok, settings = pcall(function()
+        return GetPlayerSettings and GetPlayerSettings:InvokeServer() or nil
     end)
-    if ok and type(data) == "table" then
-        applyData(data)
-        return data
+    if ok and type(settings) == "table" and type(settings.DefeatedBosses) == "table" then
+        return settings.DefeatedBosses
+    end
+    return {}
+end
+
+local function isBossDefeated(defeatedBosses, bossId)
+    bossId = string.lower(tostring(bossId or ""))
+    local aliases = BOSS_DEFEAT_ALIASES[bossId] or {bossId}
+    for _, id in ipairs(aliases) do
+        if defeatedBosses[id] == true then
+            return true
+        end
+    end
+    return false
+end
+
+local function getNextWorldBoss()
+    local defeated = getDefeatedBosses()
+    for i, bossId in ipairs(WORLD_BOSS_ORDER) do
+        if not isBossDefeated(defeated, bossId) then
+            State.WorldBossIndex = i
+            return bossId
+        end
     end
     return nil
 end
 
-DataUpdate.OnClientEvent:Connect(applyData)
-
-task.spawn(function()
-    task.wait(2)
-    syncData()
-end)
-
--- ─── Auto Hatch ───────────────────────────────────────────────────────────────
--- Uses game's _G.__setAuto (CowController.client.lua:1337). Requires AutoRoll effect/skill.
-task.spawn(function()
-    while task.wait(1.5) do
-        if not Cfg.AutoHatch then continue end
-        if _G.__setAuto then
-            if _G.__autoOn and not _G.__autoOn() then
-                local ok, err = pcall(_G.__setAuto, true)
-                if ok then
-                    logEvery("autohatch_on", "Auto Hatch set ON via _G.__setAuto", 20)
-                else
-                    logEvery("autohatch_error", "Auto Hatch failed: " .. tostring(err), 10)
-                end
+local function getNextWorldStage()
+    local defeated = getDefeatedBosses()
+    for i, stage in ipairs(WORLD_STAGES) do
+        if stage.Kind == "boss" then
+            if not isBossDefeated(defeated, stage.BossId) then
+                State.WorldBossIndex = i
+                return stage
             end
-        else
-            local rollButton = CowSimulatorGui:FindFirstChild("BottomHUD") and CowSimulatorGui.BottomHUD:FindFirstChild("RollButton")
-            if rollButton and clickButton(rollButton) then
-                logEvery("autohatch_click", "Auto Hatch clicked RollButton fallback", 15)
-            else
-                logEvery("autohatch_missing", "Auto Hatch could not find _G.__setAuto or RollButton yet", 10)
+        elseif stage.Kind == "enemy" then
+            local skipBecauseBossDone = stage.SkipIfBossDefeated and isBossDefeated(defeated, stage.SkipIfBossDefeated)
+            if not skipBecauseBossDone and not State.WorldEnemyCleared[stage.Key] then
+                State.WorldBossIndex = i
+                return stage
             end
         end
     end
-end)
-
--- ─── Auto Sell Milk ───────────────────────────────────────────────────────────
--- SellMilk:FireServer() (ShopUI.lua:532,558) | GetMilkPrice:InvokeServer() (ShopUI.lua:354)
-task.spawn(function()
-    while task.wait(10) do
-        if not Cfg.AutoSell then continue end
-        syncData()
-        local ok, priceData = pcall(function()
-            return GetMilkPrice:InvokeServer()
-        end)
-        if ok and type(priceData) == "table" and type(priceData.price) == "number" then
-            State.MilkPrice = priceData.price
-        elseif ok and type(priceData) == "number" then
-            State.MilkPrice = priceData
-        else
-            logEvery("sell_price_error", "Auto Sell could not read milk price: " .. tostring(priceData), 10)
-        end
-        logEvery("sell_check", "Auto Sell check: milk=" .. tostring(State.Milk) .. " price=" .. tostring(State.MilkPrice) .. " threshold=" .. tostring(Cfg.SellThreshold), 10)
-        if State.Milk > 0 and State.MilkPrice >= Cfg.SellThreshold then
-            local sold, err = pcall(function() SellMilk:FireServer() end)
-            if sold then
-                print("[HatchCowsAuto] Auto Sell fired SellMilk at price " .. tostring(State.MilkPrice))
-            else
-                logEvery("sell_fire_error", "Auto Sell failed: " .. tostring(err), 10)
-            end
-        end
-    end
-end)
-
--- ─── Auto Merchant ────────────────────────────────────────────────────────────
--- MerchantBuy:FireServer(item) (MerchantController.client.lua:196-208)
-task.spawn(function()
-    while task.wait(5) do
-        if not Cfg.AutoMerchant then continue end
-        syncData()
-        local m = State.MerchantData
-        if not m then
-            logEvery("merchant_no_data", "Auto Merchant waiting for Merchant data from DataUpdate", 20)
-            continue
-        end
-        if (Cfg.MerchantItem == "CheesePack" or Cfg.MerchantItem == "Both") and (m.CheesePack or 0) > 0 then
-            local ok, err = pcall(function() MerchantBuy:FireServer("CheesePack") end)
-            if ok then print("[HatchCowsAuto] Bought CheesePack") else logEvery("merchant_cheese_error", tostring(err), 10) end
-        end
-        if (Cfg.MerchantItem == "TicketPack" or Cfg.MerchantItem == "Both") and (m.TicketPack or 0) > 0 then
-            local ok, err = pcall(function() MerchantBuy:FireServer("TicketPack") end)
-            if ok then print("[HatchCowsAuto] Bought TicketPack") else logEvery("merchant_ticket_error", tostring(err), 10) end
-        end
-    end
-end)
-
--- ─── Auto Upgrades ────────────────────────────────────────────────────────────
--- PurchaseSkill:FireServer(id) (SkillTreeController.client.lua:658)
--- GetSkillTreeData:InvokeServer() returns { OwnedNodes={}, Skills={} }
-task.spawn(function()
-    while task.wait(4) do
-        if not Cfg.AutoUpgrades then continue end
-        local ok, data = pcall(function() return GetSkillTreeData:InvokeServer() end)
-        if not ok or not data then continue end
-        local owned = data.OwnedNodes or data.Skills or {}
-
-        for _, node in ipairs(SKILL_NODES) do
-            local id = node.id
-            if owned[id] then continue end
-
-            local prereqMet = true
-            for _, pre in ipairs(node.prereq or {}) do
-                if not owned[pre] then prereqMet = false; break end
-            end
-            if not prereqMet then continue end
-
-            local cost = node.cost or {}
-            if State.Money < (cost.Money or 0) then continue end
-            if State.Rolls  < (cost.TotalRolls or 0) then continue end
-
-            if Cfg.SmartUpgrades and not PRIORITY_BRANCHES[node.branch] then continue end
-
-            pcall(function() PurchaseSkill:FireServer(id) end)
-            task.wait(0.4)
-        end
-    end
-end)
-
--- ─── Auto Equip Best ─────────────────────────────────────────────────────────
-task.spawn(function()
-    while task.wait(10) do
-        if not Cfg.AutoEquipBest then continue end
-        local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
-        if not bp then continue end
-        local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
-        if btn then
-            if clickButton(btn) then
-                logEvery("equip_best", "Clicked Equip Best", 20)
-            else
-                logEvery("equip_best_fail", "Could not click Equip Best button", 10)
-            end
-        end
-    end
-end)
-
--- ─── Auto Rebirth ─────────────────────────────────────────────────────────────
--- Rebirth:FireServer() | GetRebirthInfo:InvokeServer() (RebirthPanel.lua:270,148)
-task.spawn(function()
-    while task.wait(10) do
-        if not Cfg.AutoRebirth then continue end
-        local ok, info = pcall(function() return GetRebirthInfo:InvokeServer() end)
-        if ok and info and info.CanAfford then
-            local fired, err = pcall(function() Rebirth:FireServer() end)
-            if fired then
-                print("[HatchCowsAuto] Rebirth fired successfully")
-            else
-                logEvery("rebirth_error", "Auto Rebirth failed: " .. tostring(err), 10)
-            end
-            task.wait(3)
-            if Cfg.AutoEquipBest then
-                local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
-                if bp then
-                    local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
-                    if btn then clickButton(btn) end
-                end
-            end
-        elseif not ok then
-            logEvery("rebirth_info_error", "GetRebirthInfo failed: " .. tostring(info), 10)
-        elseif info then
-            logEvery("rebirth_wait", "Auto Rebirth waiting: CanAfford=" .. tostring(info.CanAfford), 30)
-        end
-    end
-end)
-
--- ─── Teleport helper ────────────────────────────────────────────────────────
-local function tpToBiomeGate(biomeId, mode)
-    local gates = workspace:FindFirstChild("New Gates")
-    if not gates then
-        logEvery("gate_folder_missing", "workspace['New Gates'] not found for biome teleport", 10)
-        return false
-    end
-    for _, g in ipairs(gates:GetChildren()) do
-        if g:GetAttribute("BiomeId") == biomeId then
-            local char = LocalPlayer.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            if root then
-                local pivot = g:GetPivot()
-                local offset = mode == "through" and -35 or -10
-                local pos = pivot.Position + Vector3.new(0, 5, 0) + (pivot.LookVector * offset)
-                root.CFrame = CFrame.new(pos, pos + pivot.LookVector)
-                print("[HatchCowsAuto] Teleported to " .. biomeId .. " gate (" .. tostring(mode or "front") .. ")")
-                return true
-            end
-            logEvery("gate_tp_no_root", "Could not teleport: HumanoidRootPart missing", 10)
-            return false
-        end
-    end
-    logEvery("gate_not_found_" .. tostring(biomeId), "Could not find gate with BiomeId=" .. tostring(biomeId), 10)
-    return false
+    return nil
 end
 
-UnlockBiome.OnClientEvent:Connect(function(biomeId, success, msg)
-    if success then
-        State.UnlockedBiomes[biomeId] = true
-        if State.PendingBiomeUnlock == biomeId then
-            State.PendingBiomeUnlock = nil
-            task.delay(0.75, function()
-                tpToBiomeGate(biomeId, "through")
-            end)
-        end
-        print("[HatchCowsAuto] UnlockBiome success: " .. tostring(biomeId))
-    else
-        if State.PendingBiomeUnlock == biomeId then
-            State.PendingBiomeUnlock = nil
-        end
-        logEvery("unlock_fail_" .. tostring(biomeId), "UnlockBiome failed for " .. tostring(biomeId) .. ": " .. tostring(msg), 10)
+local function startBossBattle(bossId)
+    if not RequestBossBattle then
+        return false, "RequestBossBattle remote missing"
     end
-end)
+    bossId = string.lower(tostring(bossId or Cfg.BossId))
+    local tpOk, tpMsg = teleportToBattleTarget(bossId, true)
+    if not tpOk then
+        logEvery("boss_tp_missing", "Could not find live boss model for " .. bossId .. "; requesting anyway (" .. tostring(tpMsg) .. ")", 8)
+    end
+    local ok, result = pcall(function()
+        return RequestBossBattle:InvokeServer(bossId)
+    end)
+    if ok and type(result) == "table" and result.success then
+        State.InBattle = true
+        State.ActiveBossId = bossId
+        State.LastBossTime = tick()
+        return true, "started"
+    end
+    local msg = type(result) == "table" and tostring(result.message or "Unavailable") or tostring(result)
+    return false, msg
+end
 
--- ─── Auto Unlock Biome ──────────────────────────────────────────────────────
--- UnlockBiome:FireServer(biomeId) confirmed in BiomeGatesClient.lua:709
--- Server checks Money >= cost and that biome isn't already unlocked
+local function startWorldStage(stage)
+    if type(stage) ~= "table" then
+        return false, "No world stage"
+    end
+    if stage.Kind == "boss" then
+        local ok, msg = startBossBattle(stage.BossId)
+        if ok then
+            State.ActiveWorldStage = stage
+        end
+        return ok, msg
+    elseif stage.Kind == "enemy" then
+        local enemies = stage.EnemyIds
+        if type(enemies) ~= "table" or #enemies == 0 then
+            return false, "World enemy stage has no enemies"
+        end
+        requestTeleport(stage.World)
+        local tpOk, tpMsg = teleportToBattleTarget(enemies[1], false)
+        if not tpOk then
+            logEvery("world_enemy_tp_missing", "Could not find world enemy " .. tostring(enemies[1]) .. "; starting anyway (" .. tostring(tpMsg) .. ")", 8)
+        end
+        local ok, err = pcall(function()
+            DebugStartBattle:FireServer(enemies)
+        end)
+        if ok then
+            State.InBattle = true
+            State.ActiveWorldStage = stage
+            State.LastBossTime = tick()
+            return true, "started enemy"
+        end
+        return false, tostring(err)
+    end
+    return false, "Unknown world stage kind"
+end
+
 task.spawn(function()
-    while task.wait(8) do
-        if not Cfg.AutoUnlockBiome then continue end
-        syncData()
-        if State.PendingBiomeUnlock then
-            logEvery("unlock_pending", "Waiting for UnlockBiome response for " .. tostring(State.PendingBiomeUnlock), 10)
+    while task.wait(3) do
+        if not Cfg.AutoBoss or Cfg.AutoWorldBosses then continue end
+        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+            logEvery("boss_waiting", "Already in battle/raid, waiting...", 10)
             continue
         end
-        for _, gate in ipairs(BIOME_GATES) do
-            if not State.UnlockedBiomes[gate.biomeId] then
-                if State.Money >= gate.cost then
-                    tpToBiomeGate(gate.biomeId, "front")
-                    task.wait(0.75)
-                    State.PendingBiomeUnlock = gate.biomeId
-                    local ok, err = pcall(function() UnlockBiome:FireServer(gate.biomeId) end)
-                    if ok then
-                        print("[HatchCowsAuto] Requested biome unlock: " .. gate.biomeName)
-                    else
-                        State.PendingBiomeUnlock = nil
-                        logEvery("unlock_fire_error", "UnlockBiome FireServer failed: " .. tostring(err), 10)
-                    end
-                else
-                    logEvery("unlock_wait_money", "Next world " .. gate.biomeName .. " costs " .. tostring(gate.cost) .. ", current money=" .. tostring(State.Money), 20)
-                end
-                break
-            end
+        if tick() - State.LastBossTime < 8 then continue end
+        local ok, msg = startBossBattle(Cfg.BossId)
+        if ok then
+            logEvery("boss_started", "Boss battle requested: " .. tostring(Cfg.BossId), 2)
+        else
+            logEvery("boss_err", "Boss unavailable: " .. tostring(msg), 10)
+            State.LastBossTime = tick()
         end
     end
 end)
 
--- ─── Anti-AFK ─────────────────────────────────────────────────────────────────
 task.spawn(function()
-    while task.wait(60) do
-        if not Cfg.AntiAFK then continue end
-        if tick() - State.LastActivity > 240 then
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum.Jump = true
-                task.wait(0.1)
-                hum.Jump = false
-            end
-            State.LastActivity = tick()
+    while task.wait(4) do
+        if not Cfg.AutoWorldBosses then continue end
+        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+            logEvery("world_waiting", "World boss progression waiting for current battle/raid...", 10)
+            continue
+        end
+        if tick() - State.LastBossTime < 8 then continue end
+        local stage = getNextWorldStage()
+        if not stage then
+            logEvery("world_done", "All known world stages are cleared/defeated", 30)
+            continue
+        end
+        if stage.BossId then
+            Cfg.BossId = stage.BossId
+        end
+        local ok, msg = startWorldStage(stage)
+        if ok then
+            logEvery("world_started", "World progression started " .. tostring(stage.Kind) .. ": " .. tostring(stage.Label or stage.BossId or stage.Key), 2)
+        else
+            logEvery("world_err", "World stage unavailable/failed to start: " .. tostring(stage.Label or stage.BossId or stage.Key) .. " -> " .. tostring(msg), 10)
+            State.LastBossTime = tick()
         end
     end
 end)
 
--- ─── Rayfield Window ─────────────────────────────────────────────────────────
+if RaidPartyUpdate then
+    RaidPartyUpdate.OnClientEvent:Connect(function(update)
+        if type(update) ~= "table" then return end
+        if update.Action == "Sync" or update.Action == "PlayerJoined" or update.Action == "PlayerReady" then
+            State.InRaidParty = true
+        elseif update.Action == "PartyDisbanded" or update.Action == "LeftParty" or update.Action == "KickedFromParty" then
+            State.InRaidParty = false
+        elseif update.Action == "RaidStarting" then
+            State.InRaidParty = false
+        end
+    end)
+end
+
+if RaidPartyStarted then
+    RaidPartyStarted.OnClientEvent:Connect(function()
+        State.InRaidParty = false
+        State.InBattle = true
+    end)
+end
+
+local function createRaid()
+    if not RaidPartyCreate or not RaidPartyReady then
+        return false, "Raid remotes missing"
+    end
+    if Cfg.TeleportFallback then
+        requestTeleport("Raid")
+    end
+    RaidPartyCreate:FireServer({
+        IsPrivate = false,
+        BossId = Cfg.RaidBossId,
+        Difficulty = Cfg.RaidDifficulty,
+    })
+    task.wait(0.8)
+    RaidPartyReady:FireServer(true)
+    State.LastRaidTime = tick()
+    return true, "created"
+end
+
+task.spawn(function()
+    while task.wait(4) do
+        if not Cfg.AutoRaid then continue end
+        if State.InBattle or LocalPlayer:GetAttribute("InBattle") == true or LocalPlayer:GetAttribute("InRaid") == true then
+            logEvery("raid_waiting", "Already in battle/raid, waiting...", 10)
+            continue
+        end
+        if State.InRaidParty then
+            if tick() - State.LastRaidTime > 60 then
+                State.InRaidParty = false
+                logEvery("raid_watchdog", "Raid party did not start; retrying create path", 10)
+                continue
+            end
+            pcall(function() RaidPartyReady:FireServer(true) end)
+            continue
+        end
+        if tick() - State.LastRaidTime < 12 then continue end
+        local ok, msg = createRaid()
+        if ok then
+            logEvery("raid_created", "Raid party created: " .. tostring(Cfg.RaidDifficulty), 3)
+        else
+            logEvery("raid_err", "Raid unavailable: " .. tostring(msg), 10)
+            State.LastRaidTime = tick()
+        end
+    end
+end)
+
+-- ─── Auto Claim Quests ────────────────────────────────────────────────────────
+-- ClaimAllQuestsReward:FireServer() confirmed in QuestController.client.lua:1057
+task.spawn(function()
+    while task.wait(15) do
+        if not Cfg.AutoClaimQuests then continue end
+        local ok, err = pcall(function()
+            ClaimAllQuestsReward:FireServer()
+        end)
+        if ok then
+            logEvery("quest_claim", "Auto Claim Quests fired", 15)
+        else
+            logEvery("quest_claim_err", "ClaimAllQuestsReward error: " .. tostring(err), 10)
+        end
+    end
+end)
+
+-- ─── Auto Equip Best Deck ─────────────────────────────────────────────────────
+-- RequestEquipCard / RequestUnequipCard confirmed in DeckFrameController.client.lua:80-99
+task.spawn(function()
+    while task.wait(8) do
+        if not Cfg.AutoEquipBest then continue end
+        equipBestDeck()
+    end
+end)
+
+-- ─── Rayfield UI ─────────────────────────────────────────────────────────────
 local Window = Rayfield:CreateWindow({
-    Name            = "Hatch Cows Auto",
-    LoadingTitle    = "Hatch Cows Auto",
-    LoadingSubtitle = "by mercifulzack-hub",
-    ConfigurationSaving = {
-        Enabled    = false,
-    },
-    KeySystem = false,
+    Name            = "Anime Card Crusade Auto",
+    LoadingTitle    = "Anime Card Auto",
+    LoadingSubtitle = "Loading verified remotes...",
+    ConfigurationSaving = { Enabled = false },
+    Discord         = false,
+    KeySystem       = false,
 })
 
--- ══ Tab: Automation ══════════════════════════════════════════════════════════
-local AutoTab = Window:CreateTab("Automation", 4483362458)
+-- ══ Tab: Roll ═══════════════════════════════════════════════════════════════
+local RollTab = Window:CreateTab("Roll")
 
-AutoTab:CreateSection("Hatching", false)
+RollTab:CreateSection("Auto Roll", false)
 
-AutoTab:CreateToggle({
-    Name         = "Auto Hatch",
-    Info         = "Keeps the game's built-in auto-roll running via _G.__setAuto.",
+RollTab:CreateToggle({
+    Name         = "Auto Roll",
+    Info         = "Fires SetAutoRollState:FireServer(true) every second, mirrors the in-game Auto button.",
     CurrentValue = false,
-    Flag         = "AutoHatch",
-    Callback     = function(v)
-        Cfg.AutoHatch = v
-        if v and _G.__setAuto then pcall(_G.__setAuto, true) end
+    Flag         = "AutoRoll",
+    Callback     = function(v) Cfg.AutoRoll = v end,
+})
+
+RollTab:CreateToggle({
+    Name         = "Fast Roll (Skip Animation)",
+    Info         = "Fires UpdateSettings SkipRollAnimation=true. Rolls will skip the card reveal animation.",
+    CurrentValue = false,
+    Flag         = "FastRoll",
+    Callback     = function(v) Cfg.FastRoll = v end,
+})
+
+RollTab:CreateSection("Manual Roll", false)
+
+RollTab:CreateButton({
+    Name     = "Roll Once",
+    Info     = "Fires RequestCardSpin:FireServer() for one immediate roll.",
+    Interact = "Roll",
+    Callback = function()
+        local ok, err = pcall(function() RequestCardSpin:FireServer() end)
+        if ok then print("[AnimeCardAuto] Manual roll fired") else warn("[AnimeCardAuto] Roll error: " .. tostring(err)) end
     end,
 })
 
-AutoTab:CreateSection("Selling", false)
-
-AutoTab:CreateToggle({
-    Name         = "Auto Sell Milk",
-    Info         = "Fires SellMilk to server when price meets your threshold.",
-    CurrentValue = false,
-    Flag         = "AutoSell",
-    Callback     = function(v) Cfg.AutoSell = v end,
-})
-
-AutoTab:CreateDropdown({
-    Name          = "Sell Threshold",
-    Info          = "Minimum milk price (out of 20) before auto-selling.",
-    Options       = {"Low (5)", "Average (10)", "Good (15)", "Insane (18)"},
-    CurrentOption = "Average (10)",
-    MultiSelection = false,
-    Flag          = "SellThreshold",
-    Callback      = function(opt)
-        opt = firstOption(opt)
-        local map = {["Low (5)"]=5,["Average (10)"]=10,["Good (15)"]=15,["Insane (18)"]=18}
-        Cfg.SellThreshold = map[opt] or 10
-        print("[HatchCowsAuto] Sell threshold set to " .. tostring(Cfg.SellThreshold))
+RollTab:CreateButton({
+    Name     = "Roll x10",
+    Info     = "Fires RequestCardSpin 10 times with 0.15s delay.",
+    Interact = "Spam",
+    Callback = function()
+        for i = 1, 10 do
+            pcall(function() RequestCardSpin:FireServer() end)
+            task.wait(0.15)
+        end
+        print("[AnimeCardAuto] Rolled x10")
     end,
 })
 
-AutoTab:CreateSection("Merchant", false)
+-- ══ Tab: Battle ══════════════════════════════════════════════════════════════
+local BattleTab = Window:CreateTab("Battle")
 
-AutoTab:CreateToggle({
-    Name         = "Auto Buy Merchant",
-    Info         = "Fires MerchantBuy when the Travelling Merchant has stock.",
+BattleTab:CreateSection("Auto Battle", false)
+
+BattleTab:CreateToggle({
+    Name         = "Auto Battle",
+    Info         = "Fires DebugStartBattle when not in battle. Restarts when BattleEnd fires.",
     CurrentValue = false,
-    Flag         = "AutoMerchant",
-    Callback     = function(v) Cfg.AutoMerchant = v end,
+    Flag         = "AutoBattle",
+    Callback     = function(v) Cfg.AutoBattle = v end,
 })
 
-AutoTab:CreateDropdown({
-    Name          = "Merchant Item",
-    Info          = "Which item to buy from the merchant.",
-    Options       = {"CheesePack", "TicketPack", "Both"},
-    CurrentOption = "CheesePack",
+-- Sorted card list for enemy picker (by RarityNumber ascending for readability)
+local ENEMY_OPTIONS = {}
+do
+    local sorted = {}
+    for id, data in pairs(CARD_DATA) do
+        table.insert(sorted, {id = id, name = data.Name or id, rarity = tonumber(data.RarityNumber) or 0})
+    end
+    table.sort(sorted, function(a, b) return a.rarity < b.rarity end)
+    for _, v in ipairs(sorted) do
+        table.insert(ENEMY_OPTIONS, v.id .. " (" .. v.name .. ")")
+    end
+end
+
+BattleTab:CreateDropdown({
+    Name           = "Enemy Card",
+    Info           = "Pick which card to fight. Uses DebugStartBattle remote.",
+    Options        = ENEMY_OPTIONS,
+    CurrentOption  = "slime (Skeleton)",
     MultiSelection = false,
-    Flag          = "MerchantItem",
-    Callback      = function(opt) Cfg.MerchantItem = firstOption(opt) or "CheesePack" end,
+    Flag           = "BattleCardId",
+    Callback       = function(opt)
+        local choice = type(opt) == "table" and opt[1] or opt
+        if choice then
+            Cfg.BattleCardId = string.match(choice, "^([^%s%(]+)")
+        end
+    end,
 })
 
-AutoTab:CreateSection("Upgrades", false)
-
-AutoTab:CreateToggle({
-    Name         = "Auto Upgrades",
-    Info         = "Purchases skill tree nodes via PurchaseSkill when affordable.",
-    CurrentValue = false,
-    Flag         = "AutoUpgrades",
-    Callback     = function(v) Cfg.AutoUpgrades = v end,
+BattleTab:CreateSlider({
+    Name     = "Enemy Count (1-4)",
+    Info     = "Number of enemy cards to face per battle.",
+    Range    = {1, 4},
+    Increment = 1,
+    CurrentValue = 1,
+    Flag     = "BattleEnemyCount",
+    Callback = function(v) Cfg.BattleEnemyCount = v end,
 })
 
-AutoTab:CreateToggle({
-    Name         = "Smart Upgrades",
-    Info         = "Only buy Luck, SuperLuck, Speed and Milk branches first.",
+BattleTab:CreateToggle({
+    Name         = "Smart Enemy",
+    Info         = "Chooses the strongest enemy your current deck should handle. Disable to force the dropdown enemy.",
     CurrentValue = true,
-    Flag         = "SmartUpgrades",
-    Callback     = function(v) Cfg.SmartUpgrades = v end,
+    Flag         = "SmartBattle",
+    Callback     = function(v) Cfg.SmartBattle = v end,
 })
 
-AutoTab:CreateSection("Cows & Rebirth", false)
+BattleTab:CreateSlider({
+    Name     = "Smart Safety",
+    Info     = "Lower is safer. 0.85 means enemy power must stay below 85% of your deck estimate.",
+    Range    = {0.25, 1.5},
+    Increment = 0.05,
+    CurrentValue = 0.85,
+    Flag     = "SmartSafety",
+    Callback = function(v) Cfg.SmartSafety = tonumber(v) or 0.85 end,
+})
 
-AutoTab:CreateToggle({
-    Name         = "Auto Equip Best",
-    Info         = "Clicks the Equip Best button every 10 seconds.",
+BattleTab:CreateSection("Manual Battle", false)
+
+BattleTab:CreateButton({
+    Name     = "Start Battle Now",
+    Info     = "Immediately starts a battle with selected enemy.",
+    Interact = "Fight",
+    Callback = function()
+        local count = math.clamp(Cfg.BattleEnemyCount, 1, 4)
+        local enemies = {}
+        for i = 1, count do enemies[i] = Cfg.BattleCardId end
+        local tpOk, tpMsg = teleportToBattleTarget(Cfg.BattleCardId, false)
+        if not tpOk then
+            warn("[AnimeCardAuto] Enemy TP skipped: " .. tostring(tpMsg))
+        end
+        local ok, err = pcall(function() DebugStartBattle:FireServer(enemies) end)
+        if ok then print("[AnimeCardAuto] Battle started") else warn("[AnimeCardAuto] Battle error: " .. tostring(err)) end
+    end,
+})
+
+-- Boss and raid automation use the same direct remotes as the game's UI.
+local BOSS_IDS = {
+    "panther_espada",
+    "ulmiorra",
+    "itadori_yuji",
+    "mahito",
+    "toji_fushiguro",
+    "jogo",
+    "sasuke_ms",
+    "itachi_akatsuki",
+    "madara_edo",
+    "bio_android_incomplete",
+    "whitebeard_worldbreaker",
+    "aokiji_frost_admiral",
+    "kizaru_light_admiral",
+    "akainu_infernal_judgement",
+}
+
+local BOSS_OPTIONS = {}
+for _, id in ipairs(BOSS_IDS) do
+    local data = CARD_DATA[id]
+    table.insert(BOSS_OPTIONS, id .. " (" .. (data and data.Name or id) .. ")")
+end
+
+local BossTab = Window:CreateTab("Boss")
+
+BossTab:CreateSection("Boss Battles", false)
+
+BossTab:CreateDropdown({
+    Name           = "Boss",
+    Info           = "Uses RequestBossBattle directly. Locked bosses or cooldowns still fail server-side.",
+    Options        = BOSS_OPTIONS,
+    CurrentOption  = "panther_espada (Panther Espada)",
+    MultiSelection = false,
+    Flag           = "BossId",
+    Callback       = function(opt)
+        local choice = type(opt) == "table" and opt[1] or opt
+        if choice then
+            Cfg.BossId = string.match(choice, "^([^%s%(]+)")
+        end
+    end,
+})
+
+BossTab:CreateToggle({
+    Name         = "Auto Boss",
+    Info         = "Teleports to the selected boss unless close, then requests the fight.",
+    CurrentValue = false,
+    Flag         = "AutoBoss",
+    Callback     = function(v) Cfg.AutoBoss = v end,
+})
+
+BossTab:CreateToggle({
+    Name         = "Auto Worlds",
+    Info         = "Runs world lead-up enemies first, then bosses. Advances only after victory or DefeatedBosses confirmation.",
+    CurrentValue = false,
+    Flag         = "AutoWorldBosses",
+    Callback     = function(v) Cfg.AutoWorldBosses = v end,
+})
+
+BossTab:CreateToggle({
+    Name         = "TP Before Battle",
+    Info         = "Moves your character near the boss/enemy model first. If already close, it starts without moving.",
+    CurrentValue = true,
+    Flag         = "TeleportBeforeBattle",
+    Callback     = function(v) Cfg.TeleportBeforeBattle = v end,
+})
+
+BossTab:CreateToggle({
+    Name         = "World TP Fallback",
+    Info         = "If the boss model is not loaded, uses the game's TeleportEvent to go to that world before starting.",
+    CurrentValue = true,
+    Flag         = "TeleportFallback",
+    Callback     = function(v) Cfg.TeleportFallback = v end,
+})
+
+BossTab:CreateSlider({
+    Name     = "Close Distance",
+    Info     = "If you are within this many studs from the boss/enemy, the script will not move you.",
+    Range    = {10, 120},
+    Increment = 5,
+    CurrentValue = 35,
+    Flag     = "BossStartDistance",
+    Callback = function(v) Cfg.BossStartDistance = tonumber(v) or 35 end,
+})
+
+BossTab:CreateButton({
+    Name     = "Start Boss Now",
+    Info     = "Teleports to the selected boss unless close, then invokes RequestBossBattle.",
+    Interact = "Fight",
+    Callback = function()
+        local ok, msg = startBossBattle(Cfg.BossId)
+        if ok then print("[AnimeCardAuto] Boss requested: " .. tostring(Cfg.BossId)) else warn("[AnimeCardAuto] Boss failed: " .. tostring(msg)) end
+    end,
+})
+
+BossTab:CreateButton({
+    Name     = "Start Next World Stage",
+    Info     = "Finds the first uncleared world stage: lead-up enemies first, then boss.",
+    Interact = "Next",
+    Callback = function()
+        local stage = getNextWorldStage()
+        if not stage then
+            print("[AnimeCardAuto] All known world stages are already cleared.")
+            return
+        end
+        if stage.BossId then
+            Cfg.BossId = stage.BossId
+        end
+        local ok, msg = startWorldStage(stage)
+        if ok then print("[AnimeCardAuto] World stage requested: " .. tostring(stage.Label or stage.BossId or stage.Key)) else warn("[AnimeCardAuto] World stage failed: " .. tostring(msg)) end
+    end,
+})
+
+local RaidTab = Window:CreateTab("Raid")
+
+RaidTab:CreateSection("Raid Party", false)
+
+RaidTab:CreateDropdown({
+    Name           = "Difficulty",
+    Info           = "Creates a Divine General raid party at this difficulty, then readies up.",
+    Options        = {"Easy", "Medium", "Hard", "Nightmare", "Impossible"},
+    CurrentOption  = "Easy",
+    MultiSelection = false,
+    Flag           = "RaidDifficulty",
+    Callback       = function(opt)
+        local choice = type(opt) == "table" and opt[1] or opt
+        if choice then Cfg.RaidDifficulty = choice end
+    end,
+})
+
+RaidTab:CreateToggle({
+    Name         = "Auto Raid",
+    Info         = "Creates and readies a raid party when you are not in battle. Server rules still control start timing.",
+    CurrentValue = false,
+    Flag         = "AutoRaid",
+    Callback     = function(v) Cfg.AutoRaid = v end,
+})
+
+RaidTab:CreateButton({
+    Name     = "Create Raid Now",
+    Info     = "Fires RaidPartyCreate, then RaidPartyReady(true).",
+    Interact = "Create",
+    Callback = function()
+        local ok, msg = createRaid()
+        if ok then print("[AnimeCardAuto] Raid created") else warn("[AnimeCardAuto] Raid failed: " .. tostring(msg)) end
+    end,
+})
+
+-- ══ Tab: Deck ════════════════════════════════════════════════════════════════
+local DeckTab = Window:CreateTab("Deck")
+
+DeckTab:CreateSection("Auto Equip Best Deck", false)
+
+DeckTab:CreateParagraph({
+    Title   = "How it works",
+    Content = "Syncs your owned cards via RequestPlayerCards, sorts by your chosen mode, then equips the top 4 via RequestEquipCard. Only equips cards present in CardData. Updates every 8 seconds while enabled.",
+})
+
+DeckTab:CreateToggle({
+    Name         = "Auto Equip Best Deck",
+    Info         = "Automatically equips your top 4 owned cards every 8s.",
     CurrentValue = false,
     Flag         = "AutoEquipBest",
     Callback     = function(v) Cfg.AutoEquipBest = v end,
 })
 
-AutoTab:CreateToggle({
-    Name         = "Auto Rebirth",
-    Info         = "Fires Rebirth as soon as GetRebirthInfo returns CanAfford=true.",
-    CurrentValue = false,
-    Flag         = "AutoRebirth",
-    Callback     = function(v) Cfg.AutoRebirth = v end,
-})
-
-AutoTab:CreateSection("Worlds", false)
-
-AutoTab:CreateToggle({
-    Name         = "Auto Unlock Next World",
-    Info         = "Fires UnlockBiome when you can afford the next locked biome. Checks every 8 seconds.",
-    CurrentValue = false,
-    Flag         = "AutoUnlockBiome",
-    Callback     = function(v) Cfg.AutoUnlockBiome = v end,
-})
-
--- ══ Tab: Spawn Cow ═══════════════════════════════════════════════════════════
--- AddCow:FireServer(name, rarityIndex, variant?) confirmed exploitable
-local SpawnTab = Window:CreateTab("Spawn Cow")
-
-SpawnTab:CreateSection("Add Any Cow", false)
-
-SpawnTab:CreateParagraph({
-    Title   = "How it works",
-    Content = "Fires AddCow to the server with the selected cow name and its rarity index. The server adds it directly to your inventory.",
-})
-
-SpawnTab:CreateDropdown({
-    Name          = "Select Cow",
-    Info          = "Choose which cow to add to your inventory.",
-    Options       = COW_NAMES,
-    CurrentOption = "Reaper",
+DeckTab:CreateDropdown({
+    Name           = "Deck Mode",
+    Info           = "ATK = highest Damage. HP = highest HP. BALANCED = highest Damage+HP combined.",
+    Options        = {"ATK", "HP", "BALANCED"},
+    CurrentOption  = "ATK",
     MultiSelection = false,
-    Flag          = "SelectedCow",
-    Callback      = function(opt) Cfg.SelectedCow = firstOption(opt) or "Reaper" end,
+    Flag           = "EquipMode",
+    Callback       = function(opt)
+        local choice = type(opt) == "table" and opt[1] or opt
+        if choice then Cfg.EquipMode = choice end
+    end,
 })
 
-SpawnTab:CreateButton({
-    Name     = "Spawn Selected Cow",
-    Info     = "Fires AddCow:FireServer(name, rarityIndex) to add it now.",
-    Interact = "Spawn",
+DeckTab:CreateButton({
+    Name     = "Equip Best Deck Now",
+    Info     = "Immediately equips best deck based on your selected mode.",
+    Interact = "Equip",
     Callback = function()
-        local name = Cfg.SelectedCow
-        local rarity = COW_RARITY[name] or 1
-        local ok, err = pcall(function()
-            AddCow:FireServer(name, rarity)
-        end)
+        task.spawn(equipBestDeck)
+    end,
+})
+
+DeckTab:CreateSection("Manual Card Equip", false)
+
+DeckTab:CreateButton({
+    Name     = "Sync Owned Cards",
+    Info     = "Fetches your card collection from RequestPlayerCards. Required before deck building.",
+    Interact = "Sync",
+    Callback = function()
+        local ok = syncOwnedCards()
+        local count = 0
+        for _ in pairs(State.OwnedCards) do count = count + 1 end
         if ok then
-            print("[HatchCowsAuto] Spawned cow: " .. name .. " (rarity " .. rarity .. ")")
+            print("[AnimeCardAuto] Synced " .. count .. " owned cards")
         else
-            warn("[HatchCowsAuto] AddCow failed: " .. tostring(err))
+            warn("[AnimeCardAuto] Failed to sync owned cards")
         end
     end,
 })
 
-SpawnTab:CreateButton({
-    Name     = "Spam Best Cow (Reaper x10)",
-    Info     = "Fires AddCow 10 times for Reaper (rarity 14).",
-    Interact = "Spam",
-    Callback = function()
-        for i = 1, 10 do
-            pcall(function() AddCow:FireServer("Reaper", 14) end)
-            task.wait(0.15)
-        end
-        print("[HatchCowsAuto] Spammed 10x Reaper")
-    end,
-})
+-- ══ Tab: Quests ══════════════════════════════════════════════════════════════
+local QuestTab = Window:CreateTab("Quests")
 
-SpawnTab:CreateSection("Claim Offline Earnings", false)
+QuestTab:CreateSection("Auto Claim", false)
 
-SpawnTab:CreateButton({
-    Name     = "Claim Offline Earnings",
-    Info     = "Fires ClaimOffline:FireServer() to instantly collect offline money.",
-    Interact = "Claim",
-    Callback = function()
-        pcall(function() ClaimOffline:FireServer() end)
-        print("[HatchCowsAuto] Claimed offline earnings")
-    end,
-})
-
--- ══ Tab: Settings ════════════════════════════════════════════════════════════
-local SettingsTab = Window:CreateTab("Settings")
-
-SettingsTab:CreateSection("Anti-AFK", false)
-
-SettingsTab:CreateToggle({
-    Name         = "Anti-AFK",
-    Info         = "Jumps every 4 minutes of inactivity to prevent kick.",
+QuestTab:CreateToggle({
+    Name         = "Auto Claim Quests",
+    Info         = "Fires ClaimAllQuestsReward every 15 seconds.",
     CurrentValue = false,
-    Flag         = "AntiAFK",
-    Callback     = function(v)
-        Cfg.AntiAFK = v
-        pcall(function() SetSettings:FireServer("antiAfk", v) end)
-    end,
+    Flag         = "AutoClaimQuests",
+    Callback     = function(v) Cfg.AutoClaimQuests = v end,
 })
 
-SettingsTab:CreateSection("Quick Actions", false)
-
-SettingsTab:CreateButton({
-    Name     = "Sell Milk Now",
-    Info     = "Immediately fires SellMilk regardless of price.",
-    Interact = "Sell",
-    Callback = function()
-        pcall(function() SellMilk:FireServer() end)
-        print("[HatchCowsAuto] Sold milk")
-    end,
-})
-
-SettingsTab:CreateButton({
-    Name     = "Claim Fuse",
-    Info     = "Fires FuseClaim:FireServer() to collect a pending fuse.",
+QuestTab:CreateButton({
+    Name     = "Claim All Quests Now",
+    Info     = "Immediately fires ClaimAllQuestsReward:FireServer().",
     Interact = "Claim",
     Callback = function()
-        pcall(function() FuseClaim:FireServer() end)
-        print("[HatchCowsAuto] Claimed fuse")
+        local ok, err = pcall(function() ClaimAllQuestsReward:FireServer() end)
+        if ok then print("[AnimeCardAuto] Claimed all quests") else warn("[AnimeCardAuto] Quest claim error: " .. tostring(err)) end
     end,
 })
 
-print("[HatchCowsAuto] Loaded successfully!")
+-- ══ Tab: Inventory ═══════════════════════════════════════════════════════════
+local InvTab = Window:CreateTab("Inventory")
+
+InvTab:CreateSection("Items", false)
+
+InvTab:CreateButton({
+    Name     = "Use Item (1x)",
+    Info     = "Fires UseItemSecure. Edit the item ID in output first by checking your inventory.",
+    Interact = "Use",
+    Callback = function()
+        print("[AnimeCardAuto] To use an item, call UseItemSecure:FireServer(itemId, 1) with your item's server ID.")
+    end,
+})
+
+InvTab:CreateSection("Relics & Talismans", false)
+
+InvTab:CreateButton({
+    Name     = "Equip Relic (by ID)",
+    Info     = "Fires RequestEquipRelic with the relic ID from your inventory.",
+    Interact = "Equip",
+    Callback = function()
+        print("[AnimeCardAuto] To equip a relic, call RequestEquipRelic:FireServer(relicId) with the server relic ID from your inventory data.")
+    end,
+})
+
+InvTab:CreateButton({
+    Name     = "Equip Talisman (by ID)",
+    Info     = "Fires RequestEquipTalisman with talisman ID.",
+    Interact = "Equip",
+    Callback = function()
+        print("[AnimeCardAuto] To equip a talisman, call RequestEquipTalisman:FireServer(talismanId) with the server ID.")
+    end,
+})
+
+-- ══ Tab: Settings ═════════════════════════════════════════════════════════════
+local SetTab = Window:CreateTab("Settings")
+
+SetTab:CreateSection("Status", false)
+
+SetTab:CreateButton({
+    Name     = "Print Status",
+    Info     = "Prints current feature states and owned card count to output.",
+    Interact = "Print",
+    Callback = function()
+        local owned = 0
+        for _ in pairs(State.OwnedCards) do owned = owned + 1 end
+        print("===== AnimeCardAuto Status =====")
+        print("AutoRoll:        " .. tostring(Cfg.AutoRoll))
+        print("FastRoll:        " .. tostring(Cfg.FastRoll))
+        print("AutoBattle:      " .. tostring(Cfg.AutoBattle))
+        print("SmartBattle:     " .. tostring(Cfg.SmartBattle) .. " safety=" .. tostring(Cfg.SmartSafety))
+        print("  BattleCard:    " .. tostring(Cfg.BattleCardId))
+        print("  EnemyCount:    " .. tostring(Cfg.BattleEnemyCount))
+        print("AutoBoss:        " .. tostring(Cfg.AutoBoss) .. " boss=" .. tostring(Cfg.BossId))
+        print("AutoWorldBosses: " .. tostring(Cfg.AutoWorldBosses))
+        print("AutoRaid:        " .. tostring(Cfg.AutoRaid) .. " difficulty=" .. tostring(Cfg.RaidDifficulty))
+        print("TPBeforeBattle:  " .. tostring(Cfg.TeleportBeforeBattle) .. " close=" .. tostring(Cfg.BossStartDistance))
+        print("TeleportFallback:" .. tostring(Cfg.TeleportFallback))
+        print("AutoClaimQuests: " .. tostring(Cfg.AutoClaimQuests))
+        print("AutoEquipBest:   " .. tostring(Cfg.AutoEquipBest))
+        print("  DeckMode:      " .. tostring(Cfg.EquipMode))
+        print("InBattle:        " .. tostring(State.InBattle))
+        print("InRaidParty:     " .. tostring(State.InRaidParty))
+        print("LastBossResult:  " .. tostring(State.LastBossResult) .. " defeated=" .. tostring(State.LastBossDefeated))
+        print("LastWorldStage:  " .. tostring(State.LastWorldStageResult))
+        print("OwnedCards:      " .. owned .. " known")
+        print("================================")
+    end,
+})
+
+-- Initial sync on load
+task.spawn(function()
+    task.wait(3)
+    syncOwnedCards()
+    local count = 0
+    for _ in pairs(State.OwnedCards) do count = count + 1 end
+    print("[AnimeCardAuto] Loaded. Synced " .. count .. " owned cards from server.")
+end)
+
+print("[AnimeCardAuto] Script loaded successfully.")

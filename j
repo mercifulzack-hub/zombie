@@ -48,7 +48,61 @@ local UseItem        = Events:WaitForChild("UseItem")
 local ClaimOffline   = Events:WaitForChild("ClaimOffline")
 
 -- ─── Game Config ──────────────────────────────────────────────────────────────
-local SkillTreeConfig = require(Shared.Config.SkillTreeConfig)
+-- Inlined from SkillTreeConfig.lua (can't use require() in executor context)
+-- Format: { id, branch, prereq={}, cost={Money=n, TotalRolls=n} }
+local SKILL_NODES = {
+    {id="loot_open",  branch="Loot",      prereq={},            cost={Money=0}},
+    {id="auto_roll",  branch="Speed",     prereq={"loot_open"}, cost={Money=500}},
+    {id="equip_1",    branch="Equip",     prereq={"loot_open"}, cost={Money=250}},
+    {id="equip_2",    branch="Equip",     prereq={"equip_1"},   cost={Money=5000}},
+    {id="luck_1",     branch="Luck",      prereq={"auto_roll"}, cost={Money=2000}},
+    {id="luck_2",     branch="Luck",      prereq={"luck_1"},    cost={Money=5000}},
+    {id="luck_3",     branch="Luck",      prereq={"luck_2"},    cost={Money=12000}},
+    {id="luck_4",     branch="SuperLuck", prereq={"luck_3"},    cost={Money=28000}},
+    {id="luck_5",     branch="SuperLuck", prereq={"luck_4"},    cost={Money=65000}},
+    {id="luck_6",     branch="SuperLuck", prereq={"luck_5"},    cost={Money=150000}},
+    {id="luck_7",     branch="SuperLuck", prereq={"luck_6"},    cost={Money=350000}},
+    {id="luck_8",     branch="SuperLuck", prereq={"luck_7"},    cost={Money=800000}},
+    {id="luck_9",     branch="SuperLuck", prereq={"luck_8"},    cost={Money=1800000}},
+    {id="luck_10",    branch="SuperLuck", prereq={"luck_9"},    cost={Money=4000000}},
+    {id="luck_11",    branch="SuperLuck", prereq={"luck_10"},   cost={Money=9000000}},
+    {id="luck_12",    branch="SuperLuck", prereq={"luck_11"},   cost={Money=20000000}},
+    {id="luck_13",    branch="SuperLuck", prereq={"luck_12"},   cost={Money=45000000}},
+    {id="luck_14",    branch="SuperLuck", prereq={"luck_13"},   cost={Money=100000000}},
+    {id="luck_15",    branch="SuperLuck", prereq={"luck_14"},   cost={Money=220000000}},
+    {id="luck_16",    branch="SuperLuck", prereq={"luck_15"},   cost={Money=500000000}},
+    {id="luck_17",    branch="SuperLuck", prereq={"luck_16"},   cost={Money=1100000000}},
+    {id="luck_18",    branch="SuperLuck", prereq={"luck_17"},   cost={Money=2500000000}},
+    {id="luck_19",    branch="SuperLuck", prereq={"luck_18"},   cost={Money=6000000000}},
+    {id="luck_20",    branch="SuperLuck", prereq={"luck_19"},   cost={Money=15000000000}},
+    {id="speed_1",    branch="Speed",     prereq={"auto_roll"}, cost={TotalRolls=100}},
+    {id="speed_2",    branch="Speed",     prereq={"speed_1"},   cost={TotalRolls=500}},
+    {id="speed_3",    branch="Speed",     prereq={"speed_2"},   cost={TotalRolls=2000}},
+    {id="speed_4",    branch="Speed",     prereq={"speed_3"},   cost={TotalRolls=10000}},
+    {id="friend_luck_1",  branch="Friend", prereq={"luck_2"},          cost={Money=1500}},
+    {id="friend_luck_2",  branch="Friend", prereq={"friend_luck_1"},   cost={Money=5000}},
+    {id="friend_luck_3",  branch="Friend", prereq={"friend_luck_2"},   cost={Money=15000}},
+    {id="friend_luck_4",  branch="Friend", prereq={"friend_luck_3"},   cost={Money=40000}},
+    {id="friend_luck_5",  branch="Friend", prereq={"friend_luck_4"},   cost={Money=100000}},
+    {id="friend_luck_6",  branch="Friend", prereq={"friend_luck_5"},   cost={Money=300000}},
+    {id="friend_luck_7",  branch="Friend", prereq={"friend_luck_6"},   cost={Money=800000}},
+    {id="friend_luck_8",  branch="Friend", prereq={"friend_luck_7"},   cost={Money=2500000}},
+    {id="friend_luck_9",  branch="Friend", prereq={"friend_luck_8"},   cost={Money=7500000}},
+    {id="friend_luck_10", branch="Friend", prereq={"friend_luck_9"},   cost={Money=25000000}},
+    {id="friend_luck_11", branch="Friend", prereq={"friend_luck_10"},  cost={Money=80000000}},
+    {id="friend_luck_12", branch="Friend", prereq={"friend_luck_11"},  cost={Money=250000000}},
+    {id="mut_wet",      branch="Mutation", prereq={"loot_unlock"}, cost={Money=5000}},
+    {id="mut_thick",    branch="Mutation", prereq={"mut_wet"},     cost={Money=15000}},
+    {id="mut_sweet",    branch="Mutation", prereq={"mut_thick"},   cost={Money=50000}},
+    {id="mut_golden",   branch="Mutation", prereq={"mut_sweet"},   cost={Money=200000}},
+    {id="mut_crystal",  branch="Mutation", prereq={"mut_golden"},  cost={Money=1500000}},
+    {id="mut_toxic",    branch="Mutation", prereq={"mut_crystal"},  cost={Money=15000000}},
+    {id="mut_frozen",   branch="Mutation", prereq={"mut_toxic"},   cost={Money=150000000}},
+    {id="mut_void",     branch="Mutation", prereq={"mut_frozen"},  cost={Money=2000000000}},
+    {id="mut_rainbow",  branch="Mutation", prereq={"mut_void"},    cost={Money=30000000000}},
+    {id="mut_celestial",branch="Mutation", prereq={"mut_rainbow"}, cost={Money=500000000000}},
+}
+
 local CowSimulatorGui = PlayerGui:WaitForChild("CowSimulatorGui")
 
 -- All cow names + rarity index from CowData.lua (verified)
@@ -171,7 +225,7 @@ task.spawn(function()
         if not ok or not data then continue end
         local owned = data.OwnedNodes or data.Skills or {}
 
-        for _, node in ipairs(SkillTreeConfig.Nodes or {}) do
+        for _, node in ipairs(SKILL_NODES) do
             local id = node.id
             if owned[id] then continue end
 

@@ -172,8 +172,42 @@ local State = {
     MilkPrice       = 1,
     MerchantData    = nil,
     UnlockedBiomes  = {},
+    Effects         = {},
+    PendingBiomeUnlock = nil,
     LastActivity    = tick(),
 }
+
+local LastLog = {}
+local function logEvery(key, msg, interval)
+    local now = tick()
+    if not LastLog[key] or now - LastLog[key] >= (interval or 15) then
+        LastLog[key] = now
+        print("[HatchCowsAuto] " .. msg)
+    end
+end
+
+local function clickButton(button)
+    if not button then return false end
+    local ok = false
+    if firesignal then
+        ok = pcall(function()
+            firesignal(button.MouseButton1Click)
+        end)
+    end
+    if not ok then
+        ok = pcall(function()
+            button:Activate()
+        end)
+    end
+    return ok
+end
+
+local function firstOption(value)
+    if type(value) == "table" then
+        return value[1]
+    end
+    return value
+end
 
 -- ─── Config Flags ─────────────────────────────────────────────────────────────
 local Cfg = {
@@ -193,24 +227,55 @@ local Cfg = {
 }
 
 -- ─── Data Tracking ────────────────────────────────────────────────────────────
-DataUpdate.OnClientEvent:Connect(function(data)
+local function applyData(data)
     if type(data) ~= "table" then return end
     if data.Money      ~= nil then State.Money        = data.Money end
     if data.Milk       ~= nil then State.Milk         = data.Milk  end
     if data.TotalRolls ~= nil then State.Rolls        = data.TotalRolls end
     if data.Merchant        ~= nil then State.MerchantData    = data.Merchant end
     if data.UnlockedBiomes  ~= nil then State.UnlockedBiomes = data.UnlockedBiomes end
+    if data.Effects         ~= nil then State.Effects = data.Effects end
     State.LastActivity = tick()
+end
+
+local function syncData()
+    local ok, data = pcall(function()
+        return GetSkillTreeData:InvokeServer()
+    end)
+    if ok and type(data) == "table" then
+        applyData(data)
+        return data
+    end
+    return nil
+end
+
+DataUpdate.OnClientEvent:Connect(applyData)
+
+task.spawn(function()
+    task.wait(2)
+    syncData()
 end)
 
 -- ─── Auto Hatch ───────────────────────────────────────────────────────────────
--- Uses game's _G.__setAuto (CowController.client.lua:1337)
+-- Uses game's _G.__setAuto (CowController.client.lua:1337). Requires AutoRoll effect/skill.
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1.5) do
         if not Cfg.AutoHatch then continue end
         if _G.__setAuto then
             if _G.__autoOn and not _G.__autoOn() then
-                pcall(_G.__setAuto, true)
+                local ok, err = pcall(_G.__setAuto, true)
+                if ok then
+                    logEvery("autohatch_on", "Auto Hatch set ON via _G.__setAuto", 20)
+                else
+                    logEvery("autohatch_error", "Auto Hatch failed: " .. tostring(err), 10)
+                end
+            end
+        else
+            local rollButton = CowSimulatorGui:FindFirstChild("BottomHUD") and CowSimulatorGui.BottomHUD:FindFirstChild("RollButton")
+            if rollButton and clickButton(rollButton) then
+                logEvery("autohatch_click", "Auto Hatch clicked RollButton fallback", 15)
+            else
+                logEvery("autohatch_missing", "Auto Hatch could not find _G.__setAuto or RollButton yet", 10)
             end
         end
     end
@@ -219,14 +284,27 @@ end)
 -- ─── Auto Sell Milk ───────────────────────────────────────────────────────────
 -- SellMilk:FireServer() (ShopUI.lua:532,558) | GetMilkPrice:InvokeServer() (ShopUI.lua:354)
 task.spawn(function()
-    while task.wait(15) do
+    while task.wait(10) do
         if not Cfg.AutoSell then continue end
-        pcall(function()
-            local price = GetMilkPrice:InvokeServer()
-            if price then State.MilkPrice = price end
+        syncData()
+        local ok, priceData = pcall(function()
+            return GetMilkPrice:InvokeServer()
         end)
+        if ok and type(priceData) == "table" and type(priceData.price) == "number" then
+            State.MilkPrice = priceData.price
+        elseif ok and type(priceData) == "number" then
+            State.MilkPrice = priceData
+        else
+            logEvery("sell_price_error", "Auto Sell could not read milk price: " .. tostring(priceData), 10)
+        end
+        logEvery("sell_check", "Auto Sell check: milk=" .. tostring(State.Milk) .. " price=" .. tostring(State.MilkPrice) .. " threshold=" .. tostring(Cfg.SellThreshold), 10)
         if State.Milk > 0 and State.MilkPrice >= Cfg.SellThreshold then
-            pcall(function() SellMilk:FireServer() end)
+            local sold, err = pcall(function() SellMilk:FireServer() end)
+            if sold then
+                print("[HatchCowsAuto] Auto Sell fired SellMilk at price " .. tostring(State.MilkPrice))
+            else
+                logEvery("sell_fire_error", "Auto Sell failed: " .. tostring(err), 10)
+            end
         end
     end
 end)
@@ -236,13 +314,19 @@ end)
 task.spawn(function()
     while task.wait(5) do
         if not Cfg.AutoMerchant then continue end
+        syncData()
         local m = State.MerchantData
-        if not m then continue end
+        if not m then
+            logEvery("merchant_no_data", "Auto Merchant waiting for Merchant data from DataUpdate", 20)
+            continue
+        end
         if (Cfg.MerchantItem == "CheesePack" or Cfg.MerchantItem == "Both") and (m.CheesePack or 0) > 0 then
-            pcall(function() MerchantBuy:FireServer("CheesePack") end)
+            local ok, err = pcall(function() MerchantBuy:FireServer("CheesePack") end)
+            if ok then print("[HatchCowsAuto] Bought CheesePack") else logEvery("merchant_cheese_error", tostring(err), 10) end
         end
         if (Cfg.MerchantItem == "TicketPack" or Cfg.MerchantItem == "Both") and (m.TicketPack or 0) > 0 then
-            pcall(function() MerchantBuy:FireServer("TicketPack") end)
+            local ok, err = pcall(function() MerchantBuy:FireServer("TicketPack") end)
+            if ok then print("[HatchCowsAuto] Bought TicketPack") else logEvery("merchant_ticket_error", tostring(err), 10) end
         end
     end
 end)
@@ -286,7 +370,13 @@ task.spawn(function()
         local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
         if not bp then continue end
         local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
-        if btn then pcall(function() btn.MouseButton1Click:Fire() end) end
+        if btn then
+            if clickButton(btn) then
+                logEvery("equip_best", "Clicked Equip Best", 20)
+            else
+                logEvery("equip_best_fail", "Could not click Equip Best button", 10)
+            end
+        end
     end
 end)
 
@@ -297,37 +387,72 @@ task.spawn(function()
         if not Cfg.AutoRebirth then continue end
         local ok, info = pcall(function() return GetRebirthInfo:InvokeServer() end)
         if ok and info and info.CanAfford then
-            pcall(function() Rebirth:FireServer() end)
-            print("[HatchCowsAuto] Rebirth performed!")
+            local fired, err = pcall(function() Rebirth:FireServer() end)
+            if fired then
+                print("[HatchCowsAuto] Rebirth fired successfully")
+            else
+                logEvery("rebirth_error", "Auto Rebirth failed: " .. tostring(err), 10)
+            end
             task.wait(3)
             if Cfg.AutoEquipBest then
                 local bp = CowSimulatorGui:FindFirstChild("BackpackPanelNEW")
                 if bp then
                     local btn = bp:FindFirstChild("EquipBest") or bp:FindFirstChild("EquipBestButton")
-                    if btn then pcall(function() btn.MouseButton1Click:Fire() end) end
+                    if btn then clickButton(btn) end
                 end
             end
+        elseif not ok then
+            logEvery("rebirth_info_error", "GetRebirthInfo failed: " .. tostring(info), 10)
+        elseif info then
+            logEvery("rebirth_wait", "Auto Rebirth waiting: CanAfford=" .. tostring(info.CanAfford), 30)
         end
     end
 end)
 
 -- ─── Teleport helper ────────────────────────────────────────────────────────
-local function tpToBiome(biomeId)
+local function tpToBiomeGate(biomeId, mode)
     local gates = workspace:FindFirstChild("New Gates")
-    if not gates then return end
+    if not gates then
+        logEvery("gate_folder_missing", "workspace['New Gates'] not found for biome teleport", 10)
+        return false
+    end
     for _, g in ipairs(gates:GetChildren()) do
         if g:GetAttribute("BiomeId") == biomeId then
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if root then
-                local pos = g:GetPivot().Position + Vector3.new(0, 5, 15)
-                root.CFrame = CFrame.new(pos)
-                print("[HatchCowsAuto] Teleported to " .. biomeId)
+                local pivot = g:GetPivot()
+                local offset = mode == "through" and 18 or -10
+                local pos = pivot.Position + Vector3.new(0, 5, 0) + (pivot.LookVector * offset)
+                root.CFrame = CFrame.new(pos, pos + pivot.LookVector)
+                print("[HatchCowsAuto] Teleported to " .. biomeId .. " gate (" .. tostring(mode or "front") .. ")")
+                return true
             end
-            return
+            logEvery("gate_tp_no_root", "Could not teleport: HumanoidRootPart missing", 10)
+            return false
         end
     end
+    logEvery("gate_not_found_" .. tostring(biomeId), "Could not find gate with BiomeId=" .. tostring(biomeId), 10)
+    return false
 end
+
+UnlockBiome.OnClientEvent:Connect(function(biomeId, success, msg)
+    if success then
+        State.UnlockedBiomes[biomeId] = true
+        if State.PendingBiomeUnlock == biomeId then
+            State.PendingBiomeUnlock = nil
+            task.delay(0.75, function()
+                tpToBiomeGate(biomeId, "through")
+            end)
+        end
+        print("[HatchCowsAuto] UnlockBiome success: " .. tostring(biomeId))
+    else
+        if State.PendingBiomeUnlock == biomeId then
+            State.PendingBiomeUnlock = nil
+        end
+        logEvery("unlock_fail_" .. tostring(biomeId), "UnlockBiome failed for " .. tostring(biomeId) .. ": " .. tostring(msg), 10)
+    end
+end)
 
 -- ─── Auto Unlock Biome ──────────────────────────────────────────────────────
 -- UnlockBiome:FireServer(biomeId) confirmed in BiomeGatesClient.lua:709
@@ -335,13 +460,26 @@ end
 task.spawn(function()
     while task.wait(8) do
         if not Cfg.AutoUnlockBiome then continue end
+        syncData()
+        if State.PendingBiomeUnlock then
+            logEvery("unlock_pending", "Waiting for UnlockBiome response for " .. tostring(State.PendingBiomeUnlock), 10)
+            continue
+        end
         for _, gate in ipairs(BIOME_GATES) do
             if not State.UnlockedBiomes[gate.biomeId] then
                 if State.Money >= gate.cost then
-                    pcall(function() UnlockBiome:FireServer(gate.biomeId) end)
-                    print("[HatchCowsAuto] Unlocked biome: " .. gate.biomeName)
-                    task.wait(2)
-                    tpToBiome(gate.biomeId)
+                    tpToBiomeGate(gate.biomeId, "front")
+                    task.wait(0.75)
+                    State.PendingBiomeUnlock = gate.biomeId
+                    local ok, err = pcall(function() UnlockBiome:FireServer(gate.biomeId) end)
+                    if ok then
+                        print("[HatchCowsAuto] Requested biome unlock: " .. gate.biomeName)
+                    else
+                        State.PendingBiomeUnlock = nil
+                        logEvery("unlock_fire_error", "UnlockBiome FireServer failed: " .. tostring(err), 10)
+                    end
+                else
+                    logEvery("unlock_wait_money", "Next world " .. gate.biomeName .. " costs " .. tostring(gate.cost) .. ", current money=" .. tostring(State.Money), 20)
                 end
                 break
             end
@@ -411,8 +549,10 @@ AutoTab:CreateDropdown({
     MultiSelection = false,
     Flag          = "SellThreshold",
     Callback      = function(opt)
+        opt = firstOption(opt)
         local map = {["Low (5)"]=5,["Average (10)"]=10,["Good (15)"]=15,["Insane (18)"]=18}
         Cfg.SellThreshold = map[opt] or 10
+        print("[HatchCowsAuto] Sell threshold set to " .. tostring(Cfg.SellThreshold))
     end,
 })
 
@@ -433,7 +573,7 @@ AutoTab:CreateDropdown({
     CurrentOption = "CheesePack",
     MultiSelection = false,
     Flag          = "MerchantItem",
-    Callback      = function(opt) Cfg.MerchantItem = opt end,
+    Callback      = function(opt) Cfg.MerchantItem = firstOption(opt) or "CheesePack" end,
 })
 
 AutoTab:CreateSection("Upgrades", false)
@@ -500,7 +640,7 @@ SpawnTab:CreateDropdown({
     CurrentOption = "Reaper",
     MultiSelection = false,
     Flag          = "SelectedCow",
-    Callback      = function(opt) Cfg.SelectedCow = opt end,
+    Callback      = function(opt) Cfg.SelectedCow = firstOption(opt) or "Reaper" end,
 })
 
 SpawnTab:CreateButton({

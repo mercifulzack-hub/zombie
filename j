@@ -1,21 +1,23 @@
-local SCRIPT_NAME = "PetSquads"
-local VERSION = "1.0.0"
+-- Pet Squads Executor UI
+-- Host this file at:
+-- https://raw.githubusercontent.com/mercifulzack-hub/zombie/main/j
+
+local VERSION = "1.1.0"
+local ARRAYFIELD_URL = "https://raw.githubusercontent.com/UI-Interface/CustomFIeld/main/RayField.lua"
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 local VirtualUser = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
-local existing = rawget(getgenv and getgenv() or _G, "PetSquadsUI")
-if existing and type(existing.Destroy) == "function" then
-	pcall(existing.Destroy)
-end
 
 local env = getgenv and getgenv() or _G
-local app = {
+if env.PetSquadsUI and type(env.PetSquadsUI.Destroy) == "function" then
+	pcall(env.PetSquadsUI.Destroy)
+end
+
+local App = {
 	Connections = {},
 	Loops = {},
 	State = {
@@ -24,20 +26,16 @@ local app = {
 		AutoCollect = false,
 		AutoTeleportBest = false,
 		AutoRebirth = false,
-		InfinitePetSpeed = false,
 		AutoEgg = false,
 		AutoRank = false,
 		AntiAfk = false,
 		TapDistance = 120,
 		TapMode = "Normal",
 		EggAmount = 1,
-		SelectedEggId = nil,
-		SelectedEggDir = nil
-	},
-	StatusLabels = {},
-	Controls = {}
+		SelectedEgg = nil
+	}
 }
-env.PetSquadsUI = app
+env.PetSquadsUI = App
 
 local function log(...)
 	print("[PetSquads]", ...)
@@ -52,91 +50,19 @@ local function connect(signal, fn)
 		return signal:Connect(fn)
 	end)
 	if ok and conn then
-		table.insert(app.Connections, conn)
+		table.insert(App.Connections, conn)
 		return conn
 	end
 	return nil
 end
 
-local function safeCall(name, fn, ...)
-	local ok, a, b, c = pcall(fn, ...)
-	if not ok then
-		warnLog(name .. " failed:", a)
-		return nil
-	end
-	return a, b, c
-end
-
-local function waitFor(pathRoot, ...)
-	local current = pathRoot
-	for _, name in ipairs({ ... }) do
-		current = current and current:WaitForChild(name, 10)
-		if not current then
-			return nil
-		end
-	end
-	return current
-end
-
-local Library = waitFor(ReplicatedStorage, "Library")
-local Client = Library and waitFor(Library, "Client")
-local DirectoryModule = Library and Library:FindFirstChild("Directory")
-local Types = Library and Library:FindFirstChild("Types")
-
-local Modules = {}
-
-local function requireModule(label, instance)
-	if not instance then
-		warnLog("Missing module:", label)
-		return nil
-	end
-	local ok, result = pcall(require, instance)
-	if not ok then
-		warnLog("Require failed:", label, result)
-		return nil
-	end
-	return result
-end
-
-if Library and Client then
-	Modules.Directory = requireModule("Directory", DirectoryModule)
-	Modules.Save = requireModule("Client.Save", Client:FindFirstChild("Save"))
-	Modules.Network = requireModule("Client.Network", Client:FindFirstChild("Network"))
-	Modules.AutoFarmCmds = requireModule("Client.AutoFarmCmds", Client:FindFirstChild("AutoFarmCmds"))
-	Modules.EggCmds = requireModule("Client.EggCmds", Client:FindFirstChild("EggCmds"))
-	Modules.HatchingCmds = requireModule("Client.HatchingCmds", Client:FindFirstChild("HatchingCmds"))
-	Modules.ZoneCmds = requireModule("Client.ZoneCmds", Client:FindFirstChild("ZoneCmds"))
-	Modules.RebirthCmds = requireModule("Client.RebirthCmds", Client:FindFirstChild("RebirthCmds"))
-	Modules.TeleportMapCmds = requireModule("Client.TeleportMapCmds", Client:FindFirstChild("TeleportMapCmds"))
-	Modules.QuestCmds = requireModule("Client.QuestCmds", Client:FindFirstChild("QuestCmds"))
-	Modules.BreakableCmds = requireModule("Client.BreakableCmds", Client:FindFirstChild("BreakableCmds"))
-	Modules.MapCmds = requireModule("Client.MapCmds", Client:FindFirstChild("MapCmds"))
-	Modules.PlayerPet = requireModule("Client.PlayerPet", Client:FindFirstChild("PlayerPet"))
-	Modules.HatchingTypes = Types and requireModule("Types.Hatching", Types:FindFirstChild("Hatching")) or nil
-	Modules.QuestTypes = Types and requireModule("Types.Quests", Types:FindFirstChild("Quests")) or nil
-end
-
-local function getSave()
-	if not Modules.Save or type(Modules.Save.Get) ~= "function" then
-		return nil
-	end
-	return Modules.Save.Get()
-end
-
-local function setStatus(key, text)
-	local label = app.StatusLabels[key]
-	if label then
-		label.Text = text
-	end
-end
-
 local function startLoop(name, delayTime, fn)
-	if app.Loops[name] then
+	if App.Loops[name] then
 		return
 	end
-	app.Loops[name] = true
+	App.Loops[name] = true
 	task.spawn(function()
-		while app.Loops[name] do
+		while App.Loops[name] do
 			local ok, err = pcall(fn)
 			if not ok then
 				warnLog(name .. " loop error:", err)
@@ -147,870 +73,614 @@ local function startLoop(name, delayTime, fn)
 end
 
 local function stopLoop(name)
-	app.Loops[name] = nil
+	App.Loops[name] = nil
 end
 
 local function stopAllLoops()
-	for name in pairs(app.Loops) do
-		app.Loops[name] = nil
+	for name in pairs(App.Loops) do
+		App.Loops[name] = nil
 	end
 end
 
-local function make(className, props, parent)
-	local instance = Instance.new(className)
-	for key, value in pairs(props or {}) do
-		instance[key] = value
-	end
-	instance.Parent = parent
-	return instance
-end
-
-local gui = make("ScreenGui", {
-	Name = "PetSquadsUI",
-	ResetOnSpawn = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-}, PlayerGui)
-app.Gui = gui
-
-local openButton = make("TextButton", {
-	Name = "OpenClose",
-	Position = UDim2.fromOffset(18, 180),
-	Size = UDim2.fromOffset(42, 34),
-	BackgroundColor3 = Color3.fromRGB(42, 93, 150),
-	BorderSizePixel = 0,
-	Text = "PS",
-	Font = Enum.Font.GothamBold,
-	TextSize = 14,
-	TextColor3 = Color3.fromRGB(245, 248, 255)
-}, gui)
-make("UICorner", { CornerRadius = UDim.new(0, 8) }, openButton)
-make("UIStroke", { Color = Color3.fromRGB(80, 135, 195), Thickness = 1, Transparency = 0.15 }, openButton)
-
-local main = make("Frame", {
-	Name = "Main",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(560, 380),
-	BackgroundColor3 = Color3.fromRGB(18, 20, 26),
-	BorderSizePixel = 0
-}, gui)
-make("UICorner", { CornerRadius = UDim.new(0, 8) }, main)
-make("UIStroke", { Color = Color3.fromRGB(70, 78, 94), Thickness = 1, Transparency = 0.25 }, main)
-
-local titleBar = make("Frame", {
-	Name = "TitleBar",
-	Size = UDim2.new(1, 0, 0, 46),
-	BackgroundColor3 = Color3.fromRGB(25, 28, 36),
-	BorderSizePixel = 0
-}, main)
-make("UICorner", { CornerRadius = UDim.new(0, 8) }, titleBar)
-
-make("TextLabel", {
-	Name = "Title",
-	Position = UDim2.fromOffset(16, 0),
-	Size = UDim2.new(1, -120, 1, 0),
-	BackgroundTransparency = 1,
-	Text = "Pet Squads",
-	Font = Enum.Font.GothamBold,
-	TextSize = 18,
-	TextColor3 = Color3.fromRGB(238, 242, 250),
-	TextXAlignment = Enum.TextXAlignment.Left
-}, titleBar)
-
-make("TextLabel", {
-	Name = "Version",
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -52, 0, 0),
-	Size = UDim2.fromOffset(58, 46),
-	BackgroundTransparency = 1,
-	Text = "v" .. VERSION,
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = Color3.fromRGB(135, 145, 164),
-	TextXAlignment = Enum.TextXAlignment.Right
-}, titleBar)
-
-local closeButton = make("TextButton", {
-	Name = "Close",
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -12, 0.5, 0),
-	Size = UDim2.fromOffset(28, 28),
-	BackgroundColor3 = Color3.fromRGB(40, 45, 58),
-	BorderSizePixel = 0,
-	Text = "X",
-	Font = Enum.Font.GothamBold,
-	TextSize = 14,
-	TextColor3 = Color3.fromRGB(240, 245, 255)
-}, titleBar)
-make("UICorner", { CornerRadius = UDim.new(0, 6) }, closeButton)
-
-local side = make("Frame", {
-	Name = "Tabs",
-	Position = UDim2.fromOffset(0, 46),
-	Size = UDim2.fromOffset(140, 334),
-	BackgroundColor3 = Color3.fromRGB(20, 23, 30),
-	BorderSizePixel = 0
-}, main)
-make("UIListLayout", {
-	Padding = UDim.new(0, 8),
-	HorizontalAlignment = Enum.HorizontalAlignment.Center,
-	SortOrder = Enum.SortOrder.LayoutOrder
-}, side)
-make("UIPadding", {
-	PaddingTop = UDim.new(0, 12),
-	PaddingLeft = UDim.new(0, 10),
-	PaddingRight = UDim.new(0, 10)
-}, side)
-
-local content = make("Frame", {
-	Name = "Content",
-	Position = UDim2.fromOffset(140, 46),
-	Size = UDim2.new(1, -140, 1, -46),
-	BackgroundTransparency = 1
-}, main)
-
-local pages = {}
-local tabButtons = {}
-
-local function resizeCanvas(scroller)
-	local layout = scroller:FindFirstChildOfClass("UIListLayout")
-	if layout then
-		scroller.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y + 18)
-	end
-end
-
-local function createPage(name)
-	local page = make("ScrollingFrame", {
-		Name = name,
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 4,
-		CanvasSize = UDim2.fromOffset(0, 0),
-		Visible = false
-	}, content)
-	local layout = make("UIListLayout", {
-		Padding = UDim.new(0, 10),
-		SortOrder = Enum.SortOrder.LayoutOrder
-	}, page)
-	make("UIPadding", {
-		PaddingTop = UDim.new(0, 14),
-		PaddingLeft = UDim.new(0, 14),
-		PaddingRight = UDim.new(0, 14),
-		PaddingBottom = UDim.new(0, 14)
-	}, page)
-	connect(layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
-		resizeCanvas(page)
-	end)
-	pages[name] = page
-	return page
-end
-
-local function switchTab(name)
-	for pageName, page in pairs(pages) do
-		page.Visible = pageName == name
-	end
-	for tabName, button in pairs(tabButtons) do
-		button.BackgroundColor3 = tabName == name and Color3.fromRGB(54, 116, 181) or Color3.fromRGB(31, 36, 48)
-	end
-end
-
-local function createTab(name)
-	local button = make("TextButton", {
-		Name = name,
-		Size = UDim2.new(1, 0, 0, 36),
-		BackgroundColor3 = Color3.fromRGB(31, 36, 48),
-		BorderSizePixel = 0,
-		Text = name,
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(238, 242, 250)
-	}, side)
-	make("UICorner", { CornerRadius = UDim.new(0, 6) }, button)
-	tabButtons[name] = button
-	connect(button.MouseButton1Click, function()
-		switchTab(name)
-	end)
-	return createPage(name)
-end
-
-local function row(parent)
-	local frame = make("Frame", {
-		Size = UDim2.new(1, 0, 0, 42),
-		BackgroundColor3 = Color3.fromRGB(25, 29, 38),
-		BorderSizePixel = 0
-	}, parent)
-	make("UICorner", { CornerRadius = UDim.new(0, 7) }, frame)
-	make("UIStroke", { Color = Color3.fromRGB(48, 55, 70), Thickness = 1, Transparency = 0.45 }, frame)
-	return frame
-end
-
-local function section(parent, text)
-	return make("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 24),
-		BackgroundTransparency = 1,
-		Text = text,
-		Font = Enum.Font.GothamBold,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(170, 185, 205),
-		TextXAlignment = Enum.TextXAlignment.Left
-	}, parent)
-end
-
-local function createToggle(parent, label, initial, callback)
-	local frame = row(parent)
-	make("TextLabel", {
-		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -92, 1, 0),
-		BackgroundTransparency = 1,
-		Text = label,
-		Font = Enum.Font.Gotham,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(230, 235, 244),
-		TextXAlignment = Enum.TextXAlignment.Left
-	}, frame)
-	local button = make("TextButton", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(62, 28),
-		BackgroundColor3 = initial and Color3.fromRGB(55, 153, 102) or Color3.fromRGB(77, 84, 100),
-		BorderSizePixel = 0,
-		Text = initial and "ON" or "OFF",
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-		TextColor3 = Color3.fromRGB(255, 255, 255)
-	}, frame)
-	make("UICorner", { CornerRadius = UDim.new(0, 6) }, button)
-	local value = initial
-	local function setValue(nextValue, silent)
-		value = nextValue == true
-		button.Text = value and "ON" or "OFF"
-		button.BackgroundColor3 = value and Color3.fromRGB(55, 153, 102) or Color3.fromRGB(77, 84, 100)
-		if not silent then
-			callback(value)
-		end
-	end
-	connect(button.MouseButton1Click, function()
-		setValue(not value)
-	end)
-	return {
-		Set = setValue,
-		Get = function()
-			return value
-		end
-	}
-end
-
-local function createButton(parent, label, callback)
-	local button = make("TextButton", {
-		Size = UDim2.new(1, 0, 0, 40),
-		BackgroundColor3 = Color3.fromRGB(42, 93, 150),
-		BorderSizePixel = 0,
-		Text = label,
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(245, 248, 255)
-	}, parent)
-	make("UICorner", { CornerRadius = UDim.new(0, 7) }, button)
-	connect(button.MouseButton1Click, function()
-		safeCall(label, callback)
-	end)
-	return button
-end
-
-local function createInput(parent, label, defaultValue, callback)
-	local frame = row(parent)
-	make("TextLabel", {
-		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -126, 1, 0),
-		BackgroundTransparency = 1,
-		Text = label,
-		Font = Enum.Font.Gotham,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(230, 235, 244),
-		TextXAlignment = Enum.TextXAlignment.Left
-	}, frame)
-	local box = make("TextBox", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(86, 28),
-		BackgroundColor3 = Color3.fromRGB(36, 42, 55),
-		BorderSizePixel = 0,
-		Text = tostring(defaultValue),
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		TextColor3 = Color3.fromRGB(245, 248, 255),
-		ClearTextOnFocus = false
-	}, frame)
-	make("UICorner", { CornerRadius = UDim.new(0, 6) }, box)
-	connect(box.FocusLost, function()
-		local number = tonumber(box.Text)
-		if not number then
-			box.Text = tostring(defaultValue)
-			return
-		end
-		callback(number, box)
-	end)
-	return box
-end
-
-local function createDropdown(parent, label, values, selected, callback)
-	local frame = row(parent)
-	make("TextLabel", {
-		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -148, 1, 0),
-		BackgroundTransparency = 1,
-		Text = label,
-		Font = Enum.Font.Gotham,
-		TextSize = 13,
-		TextColor3 = Color3.fromRGB(230, 235, 244),
-		TextXAlignment = Enum.TextXAlignment.Left
-	}, frame)
-	local index = 1
-	for i, value in ipairs(values) do
-		if value == selected then
-			index = i
-			break
-		end
-	end
-	local button = make("TextButton", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(112, 28),
-		BackgroundColor3 = Color3.fromRGB(36, 42, 55),
-		BorderSizePixel = 0,
-		Text = tostring(values[index] or ""),
-		Font = Enum.Font.GothamSemibold,
-		TextSize = 12,
-		TextColor3 = Color3.fromRGB(245, 248, 255)
-	}, frame)
-	make("UICorner", { CornerRadius = UDim.new(0, 6) }, button)
-	connect(button.MouseButton1Click, function()
-		index += 1
-		if index > #values then
-			index = 1
-		end
-		button.Text = tostring(values[index])
-		callback(values[index])
-	end)
-	return {
-		SetValues = function(nextValues, nextSelected)
-			values = nextValues
-			index = 1
-			for i, value in ipairs(values) do
-				if value == nextSelected then
-					index = i
-					break
-				end
-			end
-			button.Text = tostring(values[index] or "")
-		end,
-		Get = function()
-			return values[index]
-		end
-	}
-end
-
-local function createStatus(parent, key, text)
-	local label = make("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundTransparency = 1,
-		Text = text,
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		TextWrapped = true,
-		TextColor3 = Color3.fromRGB(145, 158, 178),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top
-	}, parent)
-	app.StatusLabels[key] = label
-	return label
-end
-
-local function getCharacterRoot()
+local function getRoot()
 	local character = LocalPlayer.Character
 	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
-local function getCurrentZone()
-	if Modules.MapCmds and type(Modules.MapCmds.GetCurrentZone) == "function" then
-		return safeCall("GetCurrentZone", Modules.MapCmds.GetCurrentZone)
+local function getThings()
+	return Workspace:FindFirstChild("__THINGS")
+end
+
+local function findRemote(remoteName)
+	local network = ReplicatedStorage:FindFirstChild("Network")
+	if network then
+		local direct = network:FindFirstChild(remoteName)
+		if direct and (direct:IsA("RemoteEvent") or direct:IsA("RemoteFunction") or direct:IsA("UnreliableRemoteEvent")) then
+			return direct
+		end
 	end
+
+	for _, instance in ipairs(ReplicatedStorage:GetDescendants()) do
+		if instance.Name == remoteName and (instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") or instance:IsA("UnreliableRemoteEvent")) then
+			return instance
+		end
+	end
+
 	return nil
 end
 
-local function getBestOwnedZone()
-	if Modules.ZoneCmds and type(Modules.ZoneCmds.GetMaxOwnedZone) == "function" then
-		local zoneId = safeCall("GetMaxOwnedZone", Modules.ZoneCmds.GetMaxOwnedZone)
-		return zoneId
+local RemoteCache = {}
+
+local function remote(remoteName)
+	if RemoteCache[remoteName] and RemoteCache[remoteName].Parent then
+		return RemoteCache[remoteName]
 	end
-	return nil
+	local found = findRemote(remoteName)
+	RemoteCache[remoteName] = found
+	return found
 end
 
-local function teleportZone(zoneId)
-	if not zoneId then
+local function fireRemote(remoteName, ...)
+	local r = remote(remoteName)
+	if not r then
+		warnLog("Missing remote:", remoteName)
 		return false
 	end
-	if Modules.TeleportMapCmds and type(Modules.TeleportMapCmds.TeleportZones) == "function" then
-		return safeCall("TeleportZones", Modules.TeleportMapCmds.TeleportZones, zoneId)
+	if r:IsA("RemoteEvent") or r:IsA("UnreliableRemoteEvent") then
+		r:FireServer(...)
+		return true
+	end
+	if r:IsA("RemoteFunction") then
+		local ok, a, b = pcall(function(...)
+			return r:InvokeServer(...)
+		end, ...)
+		if not ok then
+			warnLog(remoteName .. " invoke failed:", a)
+			return false
+		end
+		return a, b
 	end
 	return false
 end
 
-local function findNearbyBreakables()
-	local out = {}
-	local root = getCharacterRoot()
-	if not root then
-		return out
+local function invokeRemote(remoteName, ...)
+	local r = remote(remoteName)
+	if not r then
+		warnLog("Missing remote:", remoteName)
+		return false
 	end
-	local currentZone = getCurrentZone() or getBestOwnedZone()
-	if Modules.BreakableCmds and currentZone then
-		for _, class in ipairs({ "Normal", "Chest" }) do
-			local list = nil
-			if type(Modules.BreakableCmds.AllByZoneAndClass) == "function" then
-				list = safeCall("AllByZoneAndClass", Modules.BreakableCmds.AllByZoneAndClass, currentZone, class)
-			elseif type(Modules.BreakableCmds.LegacyAllByZoneAndClass) == "function" then
-				list = safeCall("LegacyAllByZoneAndClass", Modules.BreakableCmds.LegacyAllByZoneAndClass, currentZone, class)
-			end
-			if type(list) == "table" then
-				for _, breakable in pairs(list) do
-					local model = breakable.model or breakable.Model
-					local pivot = nil
-					if typeof(model) == "Instance" and model:IsA("Model") then
-						pivot = model:GetPivot().Position
-					elseif typeof(model) == "Instance" and model:IsA("BasePart") then
-						pivot = model.Position
-					end
-					if pivot and (pivot - root.Position).Magnitude <= app.State.TapDistance then
-						table.insert(out, breakable)
-					end
-				end
+	if r:IsA("RemoteFunction") then
+		local ok, a, b = pcall(function(...)
+			return r:InvokeServer(...)
+		end, ...)
+		if not ok then
+			warnLog(remoteName .. " invoke failed:", a)
+			return false
+		end
+		return a, b
+	end
+	if r:IsA("RemoteEvent") or r:IsA("UnreliableRemoteEvent") then
+		r:FireServer(...)
+		return true
+	end
+	return false
+end
+
+local function getZoneFolders()
+	local things = getThings()
+	local out = {}
+	if things then
+		for _, name in ipairs({ "__FAKE_GROUND", "__FAKE_INSTANCE_GROUND", "__FAKE_INSTANCE_BREAK_ZONES" }) do
+			local folder = things:FindFirstChild(name)
+			if folder then
+				table.insert(out, folder)
 			end
 		end
+	end
+	local map = Workspace:FindFirstChild("Map")
+	if map then
+		table.insert(out, map)
 	end
 	return out
 end
 
-local function damageBreakables()
-	if not Modules.Network or type(Modules.Network.UnreliableFire) ~= "function" then
-		return
+local function getCurrentZoneFromGround()
+	local root = getRoot()
+	if not root then
+		return nil
 	end
-	local maxHits = app.State.TapMode == "Extreme" and 10 or 3
-	local sent = 0
-	for _, breakable in ipairs(findNearbyBreakables()) do
-		local uid = breakable.uid or breakable.UID or breakable.id or breakable.Id
-		if uid then
-			Modules.Network.UnreliableFire("Breakables_PlayerDealDamage", uid)
-			sent += 1
-			if sent >= maxHits then
-				break
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.IgnoreWater = true
+	params.FilterDescendantsInstances = getZoneFolders()
+
+	local hit = Workspace:Raycast(root.Position + Vector3.new(0, 8, 0), Vector3.new(0, -180, 0), params)
+	if not hit or not hit.Instance then
+		return nil
+	end
+
+	local instance = hit.Instance
+	while instance and instance ~= Workspace do
+		local zoneId = instance:GetAttribute("ZoneId") or instance:GetAttribute("ZoneID")
+		if zoneId then
+			return tostring(zoneId)
+		end
+		instance = instance.Parent
+	end
+
+	return hit.Instance.Name
+end
+
+local function getOwnedZoneIds()
+	local zones = {}
+	local directory = ReplicatedStorage:FindFirstChild("__DIRECTORY")
+	directory = directory and directory:FindFirstChild("Zones")
+	if directory then
+		for _, child in ipairs(directory:GetDescendants()) do
+			if child:IsA("ModuleScript") then
+				table.insert(zones, child.Name)
 			end
 		end
 	end
-	setStatus("Farm", sent > 0 and ("Tapped " .. sent .. " breakables") or "Auto tap ready")
+	return zones
 end
 
-local function collectOrbs()
-	if not Modules.Network or type(Modules.Network.Fire) ~= "function" then
-		return
-	end
-	local folder = workspace:FindFirstChild("__THINGS")
-	folder = folder and folder:FindFirstChild("Orbs")
-	if not folder then
-		return
-	end
-	local batch = {}
-	for _, child in ipairs(folder:GetChildren()) do
-		table.insert(batch, child.Name)
-		if #batch >= 80 then
-			break
-		end
-	end
-	if #batch > 0 then
-		Modules.Network.Fire("Orbs: Collect", batch)
-		setStatus("Farm", "Collecting " .. #batch .. " drops")
-	end
-end
-
-local function applyPetSpeed()
-	if not app.State.InfinitePetSpeed then
-		return
-	end
-	local PlayerPet = Modules.PlayerPet
-	if not PlayerPet or type(PlayerPet.GetByPlayer) ~= "function" then
-		return
-	end
-	local pets = PlayerPet.GetByPlayer(LocalPlayer)
-	if type(pets) ~= "table" then
-		return
-	end
-	for _, pet in pairs(pets) do
-		pcall(function()
-			pet.speedMult = 250
-			if pet.cpet and type(pet.cpet.Broadcast) == "function" then
-				pet.cpet:Broadcast("petSpeedMult", pet.speedMult)
-			end
-		end)
-	end
-end
-
-local function autoRebirth()
-	if not Modules.RebirthCmds or type(Modules.RebirthCmds.GetNextRebirth) ~= "function" or type(Modules.RebirthCmds.Rebirth) ~= "function" then
-		return
-	end
-	local nextRebirth = Modules.RebirthCmds.GetNextRebirth()
-	if nextRebirth then
-		local ok = Modules.RebirthCmds.Rebirth(nextRebirth.RebirthNumber)
-		if ok then
-			setStatus("Farm", "Rebirth requested")
-		end
-	end
-end
-
-local function getEggList()
-	local Directory = Modules.Directory
-	local EggCmds = Modules.EggCmds
-	local eggs = {}
-	if not Directory or not Directory.Eggs then
-		return eggs
-	end
-	for id, dir in pairs(Directory.Eggs) do
-		local include = dir.eggNumber ~= nil
-		if include and EggCmds and type(EggCmds.IsEggAvailable) == "function" then
-			include = EggCmds.IsEggAvailable(id)
-		end
-		if include then
-			table.insert(eggs, { Id = id, Dir = dir, Label = tostring(id) })
-		end
-	end
-	table.sort(eggs, function(a, b)
-		local an = tonumber(a.Dir.eggNumber) or 999999
-		local bn = tonumber(b.Dir.eggNumber) or 999999
-		if an == bn then
-			return a.Id < b.Id
-		end
-		return an < bn
-	end)
-	return eggs
-end
-
-local function refreshSelectedEgg()
-	local eggs = getEggList()
-	app.EggList = eggs
-	if not app.State.SelectedEggId and eggs[1] then
-		app.State.SelectedEggId = eggs[1].Id
-		app.State.SelectedEggDir = eggs[1].Dir
-	end
-	local labels = {}
-	for _, egg in ipairs(eggs) do
-		table.insert(labels, egg.Label)
-	end
-	if app.Controls.EggDropdown then
-		app.Controls.EggDropdown.SetValues(labels, app.State.SelectedEggId)
-	end
-	setStatus("Eggs", app.State.SelectedEggId and ("Selected: " .. app.State.SelectedEggId) or "No available eggs found")
-end
-
-local function setEggByLabel(label)
-	for _, egg in ipairs(app.EggList or getEggList()) do
-		if egg.Label == label then
-			app.State.SelectedEggId = egg.Id
-			app.State.SelectedEggDir = egg.Dir
-			setStatus("Eggs", "Selected: " .. egg.Id)
-			return
-		end
-	end
-end
-
-local function cappedEggAmount(amount)
-	local maxHatch = 1
-	if Modules.EggCmds and type(Modules.EggCmds.GetMaxHatch) == "function" then
-		maxHatch = Modules.EggCmds.GetMaxHatch(app.State.SelectedEggDir)
-	end
-	amount = math.floor(math.clamp(tonumber(amount) or 1, 1, maxHatch))
-	return amount, maxHatch
-end
-
-local function buySelectedEgg()
-	if not app.State.SelectedEggId or not Modules.EggCmds or type(Modules.EggCmds.RequestPurchase) ~= "function" then
+local function teleportToZone(zoneId)
+	if not zoneId or zoneId == "" then
 		return false
 	end
-	local amount = cappedEggAmount(app.State.EggAmount)
-	app.State.EggAmount = amount
-	local ok, reason = Modules.EggCmds.RequestPurchase(app.State.SelectedEggId, amount)
+	local ok = invokeRemote("Teleports_RequestTeleport", zoneId)
 	if ok then
-		setStatus("Eggs", "Purchased " .. amount .. " " .. app.State.SelectedEggId)
-	else
-		setStatus("Eggs", reason and tostring(reason) or "Egg purchase failed")
+		log("Teleport requested:", zoneId)
 	end
 	return ok
 end
 
-local function autoHatchSelectedEgg()
-	local Hatching = Modules.HatchingTypes
-	if Modules.HatchingCmds and Hatching and Hatching.Options and Hatching.Options.AUTO then
-		pcall(function()
-			Modules.HatchingCmds.SetupEgg(app.State.SelectedEggDir, app.State.EggAmount)
-			Modules.HatchingCmds.Enable(Hatching.Options.AUTO)
-			Modules.HatchingCmds.AttemptHatch()
-		end)
-	else
-		buySelectedEgg()
+local function teleportToBestKnownArea()
+	local zones = getOwnedZoneIds()
+	if #zones == 0 then
+		local current = getCurrentZoneFromGround()
+		return current and teleportToZone(current)
 	end
+
+	local bestId = zones[#zones]
+	local bestNumber = -math.huge
+	for _, zoneId in ipairs(zones) do
+		local number = tonumber(zoneId:match("%d+")) or (zoneId == "Spawn" and 1 or -1)
+		if number > bestNumber then
+			bestNumber = number
+			bestId = zoneId
+		end
+	end
+
+	return teleportToZone(bestId)
 end
 
-local function findEggZone()
-	local dir = app.State.SelectedEggDir
-	if not dir then
+local function getBreakableFolder()
+	local things = getThings()
+	if not things then
 		return nil
 	end
-	local zoneNumber = dir.zoneNumber or dir.ZoneNumber or dir.fromZoneNumber
-	if not zoneNumber and dir.eggNumber then
-		zoneNumber = dir.eggNumber
+	return things:FindFirstChild("Breakables")
+		or things:FindFirstChild("__BREAKABLES")
+		or things:FindFirstChild("Breakable")
+end
+
+local function getBreakablePosition(instance)
+	if not instance or not instance:IsA("Instance") then
+		return nil
 	end
-	local Directory = Modules.Directory
-	if Directory and Directory.Zones then
-		for zoneId, zoneDir in pairs(Directory.Zones) do
-			if zoneDir.ZoneNumber == zoneNumber or zoneId == dir.zone or zoneId == dir.Zone or zoneId == dir.ZoneID then
-				return zoneId
-			end
-		end
+	if instance:IsA("Model") then
+		return instance:GetPivot().Position
+	end
+	if instance:IsA("BasePart") then
+		return instance.Position
+	end
+	local model = instance:FindFirstAncestorOfClass("Model")
+	if model then
+		return model:GetPivot().Position
 	end
 	return nil
 end
 
-local function teleportToEggZone()
-	local zoneId = findEggZone()
-	if zoneId then
-		teleportZone(zoneId)
-		setStatus("Eggs", "Teleporting to " .. tostring(zoneId))
-	else
-		setStatus("Eggs", "No zone found for selected egg")
+local function getBreakableUid(instance)
+	local current = instance
+	while current and current ~= Workspace do
+		local uid = current:GetAttribute("BreakableUID")
+			or current:GetAttribute("UID")
+			or current:GetAttribute("uid")
+		if uid then
+			return uid
+		end
+		current = current.Parent
 	end
+	return nil
 end
 
-local supportedRankGoals = {}
+local function nearbyBreakableUids()
+	local folder = getBreakableFolder()
+	local root = getRoot()
+	local found = {}
+	if not folder or not root then
+		return found
+	end
 
-local function supportsGoal(goal)
-	local Quests = Modules.QuestTypes and Modules.QuestTypes.Goals
-	if not Quests or type(goal) ~= "table" then
-		return false
+	for _, child in ipairs(folder:GetDescendants()) do
+		local uid = getBreakableUid(child)
+		if uid then
+			local position = getBreakablePosition(child)
+			if position then
+				local distance = (position - root.Position).Magnitude
+				if distance <= App.State.TapDistance then
+					table.insert(found, { Uid = uid, Distance = distance })
+				end
+			end
+		end
 	end
-	return goal.Type == Quests.EGG
-		or goal.Type == Quests.BEST_EGG
-		or goal.Type == Quests.HATCH_CUSTOM_EGG
-		or goal.Type == Quests.BREAKABLE
-		or goal.Type == Quests.CURRENT_BREAKABLE
-		or goal.Type == Quests.CURRENCY
-		or goal.Type == Quests.OBTAIN_CURRENCY
-		or goal.Type == Quests.COLLECT_LOOTBAG
-		or goal.Type == Quests.DIAMOND_BREAKABLE
-end
 
-local function handleAutoRank()
-	local save = getSave()
-	if not save or type(save.Goals) ~= "table" then
-		setStatus("Rank", "Waiting for goals")
-		return
-	end
-	local Quests = Modules.QuestTypes and Modules.QuestTypes.Goals
-	if not Quests then
-		setStatus("Rank", "Quest types unavailable")
-		return
-	end
-	local supported = 0
-	local active = nil
-	for _, goal in pairs(save.Goals) do
-		if type(goal) == "table" and (goal.Progress or 0) < (goal.Amount or 1) and supportsGoal(goal) then
-			supported += 1
-			active = active or goal
-		end
-	end
-	if not active then
-		setStatus("Rank", "No supported active rank goals")
-		return
-	end
-	if active.Type == Quests.EGG or active.Type == Quests.BEST_EGG or active.Type == Quests.HATCH_CUSTOM_EGG then
-		if active.EggID and Modules.Directory and Modules.Directory.Eggs and Modules.Directory.Eggs[active.EggID] then
-			app.State.SelectedEggId = active.EggID
-			app.State.SelectedEggDir = Modules.Directory.Eggs[active.EggID]
-		end
-		autoHatchSelectedEgg()
-	else
-		if Modules.AutoFarmCmds and type(Modules.AutoFarmCmds.Enable) == "function" then
-			Modules.AutoFarmCmds.Enable()
-		end
-		damageBreakables()
-		collectOrbs()
-	end
-	setStatus("Rank", "Working supported goals: " .. supported)
-end
-
-local autoFarmPage = createTab("Auto Farm")
-local eggPage = createTab("Eggs")
-local rankPage = createTab("Auto Rank")
-local settingsPage = createTab("Settings")
-
-section(autoFarmPage, "Farming")
-app.Controls.AutoFarm = createToggle(autoFarmPage, "Auto Farm", false, function(value)
-	app.State.AutoFarm = value
-	if Modules.AutoFarmCmds then
-		if value and type(Modules.AutoFarmCmds.Enable) == "function" then
-			Modules.AutoFarmCmds.Enable()
-		elseif not value and type(Modules.AutoFarmCmds.Disable) == "function" then
-			Modules.AutoFarmCmds.Disable()
-		end
-	end
-end)
-app.Controls.AutoTap = createToggle(autoFarmPage, "Auto Farm/Tap", false, function(value)
-	app.State.AutoTap = value
-	if value then
-		startLoop("AutoTap", app.State.TapMode == "Extreme" and 0.08 or 0.18, damageBreakables)
-	else
-		stopLoop("AutoTap")
-	end
-end)
-createInput(autoFarmPage, "Auto Farm/Tap Distance", app.State.TapDistance, function(value, box)
-	app.State.TapDistance = math.floor(math.clamp(value, 10, 1000))
-	box.Text = tostring(app.State.TapDistance)
-end)
-createDropdown(autoFarmPage, "Tap Mode", { "Normal", "Extreme" }, app.State.TapMode, function(value)
-	app.State.TapMode = value
-	if app.State.AutoTap then
-		stopLoop("AutoTap")
-		startLoop("AutoTap", value == "Extreme" and 0.08 or 0.18, damageBreakables)
-	end
-end)
-app.Controls.AutoCollect = createToggle(autoFarmPage, "Auto Collect Drops", false, function(value)
-	app.State.AutoCollect = value
-	if value then
-		startLoop("AutoCollect", 0.35, collectOrbs)
-	else
-		stopLoop("AutoCollect")
-	end
-end)
-if Modules.PlayerPet and type(Modules.PlayerPet.GetByPlayer) == "function" then
-	app.Controls.InfinitePetSpeed = createToggle(autoFarmPage, "Infinite Pet Speed", false, function(value)
-		app.State.InfinitePetSpeed = value
-		if value then
-			startLoop("PetSpeed", 0.5, applyPetSpeed)
-		else
-			stopLoop("PetSpeed")
-		end
+	table.sort(found, function(a, b)
+		return a.Distance < b.Distance
 	end)
-end
-section(autoFarmPage, "Travel")
-app.Controls.AutoTeleportBest = createToggle(autoFarmPage, "Auto Teleport To Best Area", false, function(value)
-	app.State.AutoTeleportBest = value
-	if value then
-		startLoop("AutoTeleportBest", 5, function()
-			teleportZone(getBestOwnedZone())
-		end)
-	else
-		stopLoop("AutoTeleportBest")
-	end
-end)
-app.Controls.AutoRebirth = createToggle(autoFarmPage, "Auto Rebirth", false, function(value)
-	app.State.AutoRebirth = value
-	if value then
-		startLoop("AutoRebirth", 4, autoRebirth)
-	else
-		stopLoop("AutoRebirth")
-	end
-end)
-createStatus(autoFarmPage, "Farm", "Ready")
 
-section(eggPage, "Eggs")
-local eggLabels = {}
-for _, egg in ipairs(getEggList()) do
-	table.insert(eggLabels, egg.Label)
-end
-app.Controls.EggDropdown = createDropdown(eggPage, "Select Egg", eggLabels, eggLabels[1], setEggByLabel)
-createInput(eggPage, "Select Egg Amount", app.State.EggAmount, function(value, box)
-	local amount, maxHatch = cappedEggAmount(value)
-	app.State.EggAmount = amount
-	box.Text = tostring(amount)
-	setStatus("Eggs", "Amount capped at " .. amount .. " / " .. maxHatch)
-end)
-createButton(eggPage, "Teleport To Egg Zone", teleportToEggZone)
-createButton(eggPage, "Buy Selected Egg Once", buySelectedEgg)
-app.Controls.AutoEgg = createToggle(eggPage, "Auto Buy Selected Egg", false, function(value)
-	app.State.AutoEgg = value
-	if value then
-		startLoop("AutoEgg", 2.6, autoHatchSelectedEgg)
-	else
-		stopLoop("AutoEgg")
-		if Modules.HatchingCmds and Modules.HatchingTypes and Modules.HatchingTypes.Options then
-			pcall(function()
-				Modules.HatchingCmds.ForceDisable(Modules.HatchingTypes.Options.AUTO)
-			end)
+	local uids = {}
+	local seen = {}
+	for _, item in ipairs(found) do
+		if not seen[item.Uid] then
+			seen[item.Uid] = true
+			table.insert(uids, item.Uid)
 		end
 	end
-end)
-createButton(eggPage, "Refresh Egg List", refreshSelectedEgg)
-createStatus(eggPage, "Eggs", "Ready")
-refreshSelectedEgg()
 
-section(rankPage, "Supported Rank Goals")
-app.Controls.AutoRank = createToggle(rankPage, "Auto Rank", false, function(value)
-	app.State.AutoRank = value
-	if value then
-		startLoop("AutoRank", 2, handleAutoRank)
+	return uids
+end
+
+local function autoTap()
+	local limit = App.State.TapMode == "Extreme" and 12 or 4
+	local sent = 0
+	for _, uid in ipairs(nearbyBreakableUids()) do
+		fireRemote("Breakables_PlayerDealDamage", uid)
+		sent += 1
+		if sent >= limit then
+			break
+		end
+	end
+	if sent > 0 then
+		log("Tapped nearest breakables:", sent)
+	end
+end
+
+local function autoFarmToggle(enabled)
+	App.State.AutoFarm = enabled
+	if enabled then
+		teleportToBestKnownArea()
+		invokeRemote("AutoFarm_Enable")
 	else
-		stopLoop("AutoRank")
+		invokeRemote("AutoFarm_Disable")
 	end
-end)
-createStatus(rankPage, "Rank", "Supports hatch, best egg, breakable, currency, and lootbag goals.")
+end
 
-section(settingsPage, "Interface")
-createButton(settingsPage, "Close UI", function()
-	main.Visible = false
-end)
-createButton(settingsPage, "Destroy UI", function()
-	app.Destroy()
-end)
-app.Controls.AntiAfk = createToggle(settingsPage, "Anti AFK", false, function(value)
-	app.State.AntiAfk = value
-end)
-createStatus(settingsPage, "Settings", "RightShift toggles the UI.")
-
-local dragging = false
-local dragStart = nil
-local startPos = nil
-connect(titleBar.InputBegan, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = main.Position
-	end
-end)
-connect(titleBar.InputEnded, function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-connect(UserInputService.InputChanged, function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
-connect(closeButton.MouseButton1Click, function()
-	main.Visible = false
-end)
-connect(openButton.MouseButton1Click, function()
-	main.Visible = not main.Visible
-end)
-connect(UserInputService.InputBegan, function(input, processed)
-	if processed then
+local function collectDrops()
+	local things = getThings()
+	local orbs = things and things:FindFirstChild("Orbs")
+	if not orbs then
+		warnLog("No workspace.__THINGS.Orbs folder found")
 		return
 	end
-	if input.KeyCode == Enum.KeyCode.RightShift then
-		main.Visible = not main.Visible
+
+	local batch = {}
+	for _, orb in ipairs(orbs:GetChildren()) do
+		table.insert(batch, orb.Name)
+		if #batch >= 100 then
+			break
+		end
 	end
+
+	if #batch == 0 then
+		return
+	end
+
+	local ok = fireRemote("Orbs: Collect", batch)
+	if ok then
+		log("Collect drops sent:", #batch)
+	end
+end
+
+local function autoRebirth()
+	invokeRemote("Rebirth_Request")
+end
+
+local function getEggIds()
+	local ids = {}
+	local eggsFolder = ReplicatedStorage:FindFirstChild("__DIRECTORY")
+	eggsFolder = eggsFolder and eggsFolder:FindFirstChild("Eggs")
+
+	if eggsFolder then
+		for _, child in ipairs(eggsFolder:GetDescendants()) do
+			if child:IsA("ModuleScript") then
+				table.insert(ids, child.Name)
+			end
+		end
+	end
+
+	table.sort(ids)
+	if #ids == 0 then
+		table.insert(ids, "No eggs found")
+	end
+	return ids
+end
+
+local function setSelectedEgg(option)
+	if type(option) == "table" then
+		option = option[1]
+	end
+	if option == "No eggs found" then
+		App.State.SelectedEgg = nil
+	else
+		App.State.SelectedEgg = tostring(option)
+	end
+	log("Selected egg:", App.State.SelectedEgg or "nil")
+end
+
+local function buySelectedEgg()
+	if not App.State.SelectedEgg then
+		warnLog("No egg selected")
+		return
+	end
+	local amount = math.max(1, math.floor(tonumber(App.State.EggAmount) or 1))
+	local ok, msg = invokeRemote("Eggs_RequestPurchase", App.State.SelectedEgg, amount)
+	if not ok and msg then
+		warnLog("Egg purchase failed:", msg)
+	end
+end
+
+local function autoRankStep()
+	-- Without requiring Client.Save, rank goals are not safely readable from this executor context.
+	-- Best effort: keep farm/tap/drop collection and egg purchase loops active so supported goals progress.
+	if App.State.SelectedEgg then
+		buySelectedEgg()
+	end
+	autoTap()
+	collectDrops()
+end
+
+local function destroy()
+	stopAllLoops()
+	pcall(function()
+		invokeRemote("AutoFarm_Disable")
+	end)
+	for _, conn in ipairs(App.Connections) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	App.Connections = {}
+	if env.PetSquadsUI == App then
+		env.PetSquadsUI = nil
+	end
+	log("Destroyed")
+end
+App.Destroy = destroy
+
+local ArrayField
+local ok, result = pcall(function()
+	return loadstring(game:HttpGet(ARRAYFIELD_URL))()
 end)
+
+if ok then
+	ArrayField = result
+else
+	warnLog("ArrayField failed to load:", result)
+	return
+end
+
+local Window = ArrayField:CreateWindow({
+	Name = "Pet Squads",
+	LoadingTitle = "Pet Squads",
+	LoadingSubtitle = "v" .. VERSION,
+	ConfigurationSaving = {
+		Enabled = false,
+		FolderName = nil,
+		FileName = "PetSquads"
+	},
+	Discord = {
+		Enabled = false,
+		Invite = "",
+		RememberJoins = false
+	},
+	KeySystem = false,
+	KeySettings = {
+		Title = "Pet Squads",
+		Subtitle = "",
+		Note = "",
+		FileName = "PetSquadsKey",
+		SaveKey = false,
+		GrabKeyFromSite = false,
+		Key = ""
+	}
+})
+
+local AutoFarmTab = Window:CreateTab("Auto Farm", 4483362458)
+local EggsTab = Window:CreateTab("Eggs", 4483362458)
+local RankTab = Window:CreateTab("Auto Rank", 4483362458)
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+AutoFarmTab:CreateSection("Farming", false)
+AutoFarmTab:CreateToggle({
+	Name = "Auto Farm",
+	Info = "Teleports to best known area, then requests built-in auto farm.",
+	CurrentValue = false,
+	Flag = "PS_AutoFarm",
+	Callback = function(value)
+		autoFarmToggle(value)
+	end
+})
+AutoFarmTab:CreateToggle({
+	Name = "Auto Farm/Tap",
+	Info = "Taps nearest breakables/coin piles/chests in your tap distance.",
+	CurrentValue = false,
+	Flag = "PS_AutoTap",
+	Callback = function(value)
+		App.State.AutoTap = value
+		if value then
+			startLoop("AutoTap", App.State.TapMode == "Extreme" and 0.08 or 0.18, autoTap)
+		else
+			stopLoop("AutoTap")
+		end
+	end
+})
+AutoFarmTab:CreateSlider({
+	Name = "Auto Farm/Tap Distance",
+	Range = { 10, 1000 },
+	Increment = 10,
+	Suffix = "studs",
+	CurrentValue = App.State.TapDistance,
+	Flag = "PS_TapDistance",
+	Callback = function(value)
+		App.State.TapDistance = tonumber(value) or 120
+	end
+})
+AutoFarmTab:CreateDropdown({
+	Name = "Tap Mode",
+	Options = { "Normal", "Extreme" },
+	CurrentOption = "Normal",
+	MultiSelection = false,
+	Flag = "PS_TapMode",
+	Callback = function(option)
+		if type(option) == "table" then
+			option = option[1]
+		end
+		App.State.TapMode = tostring(option or "Normal")
+		if App.State.AutoTap then
+			stopLoop("AutoTap")
+			startLoop("AutoTap", App.State.TapMode == "Extreme" and 0.08 or 0.18, autoTap)
+		end
+	end
+})
+AutoFarmTab:CreateToggle({
+	Name = "Auto Collect Drops",
+	Info = "Collects visible coin, diamond, item, and lootbag orb ids if the collect remote accepts them.",
+	CurrentValue = false,
+	Flag = "PS_AutoCollect",
+	Callback = function(value)
+		App.State.AutoCollect = value
+		if value then
+			startLoop("AutoCollect", 0.35, collectDrops)
+		else
+			stopLoop("AutoCollect")
+		end
+	end
+})
+AutoFarmTab:CreateSection("Travel", false)
+AutoFarmTab:CreateToggle({
+	Name = "Auto Teleport To Best Area",
+	CurrentValue = false,
+	Flag = "PS_AutoTeleportBest",
+	Callback = function(value)
+		App.State.AutoTeleportBest = value
+		if value then
+			startLoop("AutoTeleportBest", 5, teleportToBestKnownArea)
+		else
+			stopLoop("AutoTeleportBest")
+		end
+	end
+})
+AutoFarmTab:CreateToggle({
+	Name = "Auto Rebirth",
+	CurrentValue = false,
+	Flag = "PS_AutoRebirth",
+	Callback = function(value)
+		App.State.AutoRebirth = value
+		if value then
+			startLoop("AutoRebirth", 4, autoRebirth)
+		else
+			stopLoop("AutoRebirth")
+		end
+	end
+})
+
+EggsTab:CreateSection("Eggs", false)
+local eggIds = getEggIds()
+setSelectedEgg(eggIds[1])
+EggsTab:CreateDropdown({
+	Name = "Select Egg",
+	Options = eggIds,
+	CurrentOption = eggIds[1],
+	MultiSelection = false,
+	Flag = "PS_SelectEgg",
+	Callback = setSelectedEgg
+})
+EggsTab:CreateInput({
+	Name = "Select Egg Amount",
+	PlaceholderText = "1",
+	NumbersOnly = true,
+	OnEnter = false,
+	RemoveTextAfterFocusLost = false,
+	Callback = function(text)
+		App.State.EggAmount = math.max(1, math.floor(tonumber(text) or 1))
+	end
+})
+EggsTab:CreateButton({
+	Name = "Buy Selected Egg Once",
+	Interact = "Buy",
+	Callback = buySelectedEgg
+})
+EggsTab:CreateToggle({
+	Name = "Auto Buy Selected Egg",
+	CurrentValue = false,
+	Flag = "PS_AutoEgg",
+	Callback = function(value)
+		App.State.AutoEgg = value
+		if value then
+			startLoop("AutoEgg", 2.6, buySelectedEgg)
+		else
+			stopLoop("AutoEgg")
+		end
+	end
+})
+EggsTab:CreateButton({
+	Name = "Teleport To Egg Zone",
+	Interact = "Teleport",
+	Callback = function()
+		-- Egg-to-zone metadata is not safely readable without requiring Directory.
+		-- This teleports to the best known area as the safest available fallback.
+		teleportToBestKnownArea()
+	end
+})
+
+RankTab:CreateSection("Best Effort", false)
+RankTab:CreateToggle({
+	Name = "Auto Rank",
+	Info = "Best effort without unsafe Save require: farm/tap/collect/hatch loops progress supported goals.",
+	CurrentValue = false,
+	Flag = "PS_AutoRank",
+	Callback = function(value)
+		App.State.AutoRank = value
+		if value then
+			startLoop("AutoRank", 2, autoRankStep)
+		else
+			stopLoop("AutoRank")
+		end
+	end
+})
+
+SettingsTab:CreateSection("Settings", false)
+SettingsTab:CreateToggle({
+	Name = "Anti AFK",
+	CurrentValue = false,
+	Flag = "PS_AntiAfk",
+	Callback = function(value)
+		App.State.AntiAfk = value
+	end
+})
+SettingsTab:CreateButton({
+	Name = "Destroy Script",
+	Interact = "Destroy",
+	Callback = destroy
+})
+
 connect(LocalPlayer.Idled, function()
-	if not app.State.AntiAfk then
+	if not App.State.AntiAfk then
 		return
 	end
 	pcall(function()
@@ -1019,36 +689,5 @@ connect(LocalPlayer.Idled, function()
 	end)
 end)
 
-function app.Destroy()
-	stopAllLoops()
-	for _, control in pairs(app.Controls) do
-		if type(control) == "table" and type(control.Set) == "function" then
-			pcall(control.Set, false, true)
-		end
-	end
-	if Modules.AutoFarmCmds and type(Modules.AutoFarmCmds.Disable) == "function" then
-		pcall(Modules.AutoFarmCmds.Disable)
-	end
-	if Modules.HatchingCmds and Modules.HatchingTypes and Modules.HatchingTypes.Options then
-		pcall(function()
-			Modules.HatchingCmds.ForceDisable(Modules.HatchingTypes.Options.AUTO)
-		end)
-	end
-	for _, conn in ipairs(app.Connections) do
-		pcall(function()
-			conn:Disconnect()
-		end)
-	end
-	app.Connections = {}
-	if gui then
-		gui:Destroy()
-	end
-	if env.PetSquadsUI == app then
-		env.PetSquadsUI = nil
-	end
-end
-
-switchTab("Auto Farm")
-log("UI ready")
-
-return app
+log("ArrayField UI loaded. Custom Discord/key system disabled.")
+return App

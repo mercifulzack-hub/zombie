@@ -22,6 +22,11 @@ local function loadArrayfield()
 			"if %(input%.KeyCode == Enum%.KeyCode%.RightShift and not processed%) then",
 			"if false then"
 		)
+		-- Guard KeySettings access so ArrayField can load with KeySystem removed.
+		source = source:gsub(
+			"if typeof%(Settings%.KeySettings%.Key%) == \"string\" then Settings%.KeySettings%.Key = %{Settings%.KeySettings%.Key%} end",
+			"if Settings.KeySettings and typeof(Settings.KeySettings.Key) == \"string\" then Settings.KeySettings.Key = {Settings.KeySettings.Key} end"
+		)
 		return loadstring(source)()
 	end)
 end

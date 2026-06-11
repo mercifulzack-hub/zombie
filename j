@@ -97,7 +97,6 @@ local Window = ArrayField:CreateWindow({
 		FileName = "Settings",
 	},
 	Discord = { Enabled = false },
-	KeySystem = false,
 })
 
 local FarmTab = Window:CreateTab("Farm", 4483362458)

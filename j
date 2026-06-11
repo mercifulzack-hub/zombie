@@ -66,6 +66,11 @@ local function loadArrayfield()
 			"if typeof%(Settings%.KeySettings%.Key%) == \"string\" then Settings%.KeySettings%.Key = %{Settings%.KeySettings%.Key%} end",
 			"if Settings.KeySettings and typeof(Settings.KeySettings.Key) == \"string\" then Settings.KeySettings.Key = {Settings.KeySettings.Key} end"
 		)
+		-- Skip the Discord invite block unless an actual invite code exists.
+		source = source:gsub(
+			"if Settings%.Discord then",
+			"if Settings.Discord and Settings.Discord.Invite then"
+		)
 		return loadstring(source)()
 	end)
 end

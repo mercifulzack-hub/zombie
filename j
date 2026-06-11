@@ -100,10 +100,17 @@ local ActivateAutoRebirth = Events and Events:WaitForChild("ActivateAutoRebirth"
 local SetAutoHatch = Events and Events:WaitForChild("SetAutoHatch", 5)
 local Hatch = Functions and Functions:WaitForChild("Hatch", 5)
 
-local ClaimGroupReward = Functions and Functions:FindFirstChild("ClaimGroupReward")
-local PremiumRewards = Functions and Functions:FindFirstChild("PremiumRewards")
-local ClaimPlayTimeReward = Events and Events:FindFirstChild("ClaimPlayTimeReward")
-local CollectDailyReward = Events and Events:FindFirstChild("CollectDailyReward")
+local ClaimGroupReward = Functions and Functions:WaitForChild("ClaimGroupReward", 5)
+local PremiumRewards = Functions and Functions:WaitForChild("PremiumRewards", 5)
+local PurchaseUpgrade = Functions and Functions:WaitForChild("PurchaseUpgrade", 5)
+local BuyPrestigeTier = Functions and Functions:WaitForChild("BuyPrestigeTier", 5)
+local ClaimPrestige = Functions and Functions:WaitForChild("ClaimPrestige", 5)
+local ClaimPlayTimeReward = Events and Events:WaitForChild("ClaimPlayTimeReward", 5)
+local CollectDailyReward = Events and Events:WaitForChild("CollectDailyReward", 5)
+local ClaimAchievement = Events and Events:WaitForChild("ClaimAchievement", 5)
+local ClaimIndexEggReward = Events and Events:WaitForChild("ClaimIndexEggReward", 5)
+local ClaimIndexTierReward = Events and Events:WaitForChild("ClaimIndexTierReward", 5)
+local FollowReward = Events and Events:WaitForChild("FollowReward", 5)
 
 -- Hardcoded from game source (Eggs.lua) - no module load
 local eggOptions = {
@@ -129,6 +136,25 @@ local rebirthByText = {
 	["2.5K"] = 10, ["5K"] = 11, ["10K"] = 12, ["25K"] = 13, ["50K"] = 14,
 }
 local hatchModes = { "Single", "Triple", "Max" }
+local upgradeOrder = {
+	{ "Spawn", "HatchSpeed" },
+	{ "Spawn", "WalkSpeed" },
+	{ "Spawn", "HoverboardSpeed" },
+	{ "Spawn", "HoverboardJump" },
+	{ "Spawn", "ClickMulti" },
+	{ "Spawn", "GemMulti" },
+	{ "Spawn", "LuckMulti" },
+	{ "Spawn", "GemChance" },
+	{ "Spawn", "CriticalChance" },
+	{ "Spawn", "MoreStorage" },
+	{ "Spawn", "PetEquip" },
+	{ "Spawn", "ChestAutoCollect" },
+	{ "Spawn", "RebirthButtons" },
+}
+local followRewardKeys = {
+	"FollowedReaperGaming332",
+	"FollowedGems12835384",
+}
 
 -- State
 local toggles = {
@@ -136,12 +162,144 @@ local toggles = {
 	autoRebirth = false,
 	autoHatch = false,
 	autoMastery = false,
+	autoUpgrades = false,
+	autoPrestige = false,
 	autoRewards = false,
+	autoAchievements = false,
+	autoIndexRewards = false,
 }
 
 local selectedEgg = eggOptions[1] or "Common Egg"
 local selectedHatchMode = "Single"
 local selectedRebirthIndex = 1
+local prestigeRewardCount = 50
+local achievementClaimList = {}
+local indexEggNames = {}
+local indexTierCount = 20
+
+local function loadModule(path, context)
+	local ok, module = pcall(require, path)
+	if not ok then
+		warnf(context .. " module unavailable", module)
+		return nil
+	end
+	return module
+end
+
+local function refreshPrestigeRewardCount()
+	local PrestigeConfig = loadModule(ReplicatedStorage.Modules.PrestigeConfig, "PrestigeConfig")
+
+	if PrestigeConfig and type(PrestigeConfig.GetTotal) == "function" then
+		local totalOk, total = pcall(PrestigeConfig.GetTotal)
+		if totalOk and type(total) == "number" and total > 0 then
+			prestigeRewardCount = total
+		end
+	end
+end
+
+local function refreshAchievementClaimList()
+	local Achievements = loadModule(ReplicatedStorage.Modules.Achievements, "Achievements")
+	if not Achievements then
+		return
+	end
+
+	local list = {}
+	for category, tiers in pairs(Achievements) do
+		if type(category) == "string" and type(tiers) == "table" then
+			for tier = 1, #tiers do
+				table.insert(list, { category, tier })
+			end
+		end
+	end
+
+	achievementClaimList = list
+end
+
+local function refreshIndexClaimLists()
+	local IndexRewards = loadModule(ReplicatedStorage.Modules.IndexRewards, "IndexRewards")
+	if not IndexRewards then
+		return
+	end
+
+	local eggNames = {}
+	for eggName in pairs(IndexRewards.EggRewards or {}) do
+		table.insert(eggNames, eggName)
+	end
+	table.sort(eggNames)
+
+	indexEggNames = eggNames
+	indexTierCount = #(IndexRewards.TierRewards or {})
+	if indexTierCount <= 0 then
+		indexTierCount = 20
+	end
+end
+
+refreshPrestigeRewardCount()
+refreshAchievementClaimList()
+refreshIndexClaimLists()
+
+local function claimStandardRewards(shouldContinue)
+	safeRemoteCall(ClaimGroupReward, "InvokeServer", "Claim group reward")
+	safeRemoteCall(PremiumRewards, "InvokeServer", "Claim premium rewards")
+
+	for _, key in ipairs(followRewardKeys) do
+		if shouldContinue and not shouldContinue() then return end
+		safeRemoteCall(FollowReward, "FireServer", "Claim follow reward " .. key, key)
+		task.wait(0.02)
+	end
+
+	for i = 1, prestigeRewardCount do
+		if shouldContinue and not shouldContinue() then return end
+		safeRemoteCall(ClaimPrestige, "InvokeServer", "Claim prestige reward " .. tostring(i), i)
+		task.wait(0.02)
+	end
+
+	if CollectDailyReward then
+		for i = 1, 30 do
+			if shouldContinue and not shouldContinue() then return end
+			safeRemoteCall(CollectDailyReward, "FireServer", "Claim daily reward " .. tostring(i), tostring(i))
+			task.wait(0.02)
+		end
+	end
+
+	if ClaimPlayTimeReward then
+		for i = 1, 15 do
+			if shouldContinue and not shouldContinue() then return end
+			safeRemoteCall(ClaimPlayTimeReward, "FireServer", "Claim playtime reward " .. tostring(i), i)
+			task.wait(0.02)
+		end
+	end
+end
+
+local function claimAchievements(shouldContinue)
+	if #achievementClaimList == 0 then
+		refreshAchievementClaimList()
+	end
+
+	for _, claim in ipairs(achievementClaimList) do
+		if shouldContinue and not shouldContinue() then return end
+		safeRemoteCall(ClaimAchievement, "FireServer", "Claim achievement " .. claim[1] .. " " .. tostring(claim[2]), claim[1], claim[2])
+		task.wait(0.02)
+	end
+end
+
+local function claimIndexRewards(shouldContinue)
+	if #indexEggNames == 0 then
+		refreshIndexClaimLists()
+	end
+
+	for _, eggName in ipairs(indexEggNames) do
+		if shouldContinue and not shouldContinue() then return end
+		safeRemoteCall(ClaimIndexEggReward, "FireServer", "Claim index egg reward " .. eggName, eggName)
+		task.wait(0.02)
+	end
+
+	for tier = 1, indexTierCount do
+		if shouldContinue and not shouldContinue() then return end
+		safeRemoteCall(ClaimIndexTierReward, "FireServer", "Claim index tier reward " .. tostring(tier), tier)
+		task.wait(0.02)
+	end
+end
 
 -- UI
 local Window = ArrayField:CreateWindow({
@@ -175,8 +333,8 @@ FarmTab:CreateDropdown({
 	MultiSelection = false,
 	Callback = function(opt)
 		selectedRebirthIndex = rebirthByText[opt] or 1
-		if toggles.autoRebirth and SetAutoRebirth then
-			SetAutoRebirth:FireServer(selectedRebirthIndex)
+		if toggles.autoRebirth then
+			safeRemoteCall(SetAutoRebirth, "FireServer", "Auto Rebirth amount update", selectedRebirthIndex)
 		end
 	end
 })
@@ -190,6 +348,21 @@ FarmTab:CreateToggle({
 		safeRemoteCall(SetAutoRebirth, "FireServer", "Auto Rebirth amount update", v and selectedRebirthIndex or 0)
 		safeRemoteCall(ActivateAutoRebirth, "FireServer", "Auto Rebirth toggle", v)
 	end
+})
+
+FarmTab:CreateSection("Progression", false)
+FarmTab:CreateToggle({
+	Name = "Auto Upgrades",
+	CurrentValue = false,
+	Flag = "AutoUpgrades",
+	Callback = function(v) toggles.autoUpgrades = v end
+})
+
+FarmTab:CreateToggle({
+	Name = "Auto Prestige",
+	CurrentValue = false,
+	Flag = "AutoPrestige",
+	Callback = function(v) toggles.autoPrestige = v end
 })
 
 -- Eggs
@@ -241,26 +414,27 @@ MiscTab:CreateToggle({
 	Callback = function(v) toggles.autoRewards = v end
 })
 
+MiscTab:CreateToggle({
+	Name = "Auto Claim Achievements",
+	CurrentValue = false,
+	Flag = "AutoAchievements",
+	Callback = function(v) toggles.autoAchievements = v end
+})
+
+MiscTab:CreateToggle({
+	Name = "Auto Claim Index Rewards",
+	CurrentValue = false,
+	Flag = "AutoIndexRewards",
+	Callback = function(v) toggles.autoIndexRewards = v end
+})
+
 MiscTab:CreateButton({
 	Name = "Claim Rewards Once",
 	Callback = function()
 		safeTask("Claim Rewards Once", function()
-			safeRemoteCall(ClaimGroupReward, "InvokeServer", "Claim group reward")
-			safeRemoteCall(PremiumRewards, "InvokeServer", "Claim premium rewards")
-
-			if CollectDailyReward then
-				for i = 1, 30 do
-					safeRemoteCall(CollectDailyReward, "FireServer", "Claim daily reward " .. tostring(i), tostring(i))
-					task.wait(0.02)
-				end
-			end
-
-			if ClaimPlayTimeReward then
-				for i = 1, 15 do
-					safeRemoteCall(ClaimPlayTimeReward, "FireServer", "Claim playtime reward " .. tostring(i), i)
-					task.wait(0.02)
-				end
-			end
+			claimStandardRewards()
+			claimAchievements()
+			claimIndexRewards()
 		end)
 	end
 })
@@ -299,22 +473,60 @@ runLoop("autoMastery", 0.22, function()
 	safeRemoteCall(Rebirth, "FireServer", "Auto Mastery rebirth", selectedRebirthIndex)
 end)
 
+runLoop("autoUpgrades", 1.25, function()
+	for _, upgrade in ipairs(upgradeOrder) do
+		if not toggles.autoUpgrades then
+			return
+		end
+
+		safeRemoteCall(PurchaseUpgrade, "InvokeServer", "Auto Upgrade " .. upgrade[2], upgrade[1], upgrade[2])
+		task.wait(0.05)
+	end
+end)
+
+runLoop("autoPrestige", 2.5, function()
+	for tier = 1, 4 do
+		if not toggles.autoPrestige then
+			return
+		end
+
+		safeRemoteCall(BuyPrestigeTier, "InvokeServer", "Auto Prestige tier " .. tostring(tier), tier)
+		task.wait(0.05)
+	end
+
+	for i = 1, prestigeRewardCount do
+		if not toggles.autoPrestige then
+			return
+		end
+
+		safeRemoteCall(ClaimPrestige, "InvokeServer", "Auto Prestige reward " .. tostring(i), i)
+		task.wait(0.03)
+	end
+end)
+
 -- Rewards loop (hardcoded claims only)
 task.spawn(function()
 	while task.wait(10) do
 		if toggles.autoRewards then
-			safeRemoteCall(ClaimGroupReward, "InvokeServer", "Auto claim group reward")
-			safeRemoteCall(PremiumRewards, "InvokeServer", "Auto claim premium rewards")
-			if CollectDailyReward then
-				for i = 1, 30 do
-					safeRemoteCall(CollectDailyReward, "FireServer", "Auto claim daily reward " .. tostring(i), tostring(i))
-				end
-			end
-			if ClaimPlayTimeReward then
-				for i = 1, 15 do
-					safeRemoteCall(ClaimPlayTimeReward, "FireServer", "Auto claim playtime reward " .. tostring(i), i)
-				end
-			end
+			claimStandardRewards(function() return toggles.autoRewards end)
+			task.wait(1)
+		end
+	end
+end)
+
+task.spawn(function()
+	while task.wait(12) do
+		if toggles.autoAchievements then
+			claimAchievements(function() return toggles.autoAchievements end)
+			task.wait(1)
+		end
+	end
+end)
+
+task.spawn(function()
+	while task.wait(15) do
+		if toggles.autoIndexRewards then
+			claimIndexRewards(function() return toggles.autoIndexRewards end)
 			task.wait(1)
 		end
 	end

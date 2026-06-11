@@ -101,7 +101,6 @@ local Window = ArrayField:CreateWindow({
 		FolderName = "RebirthHatchers",
 		FileName = "Settings",
 	},
-	Discord = { Enabled = false },
 })
 
 local FarmTab = Window:CreateTab("Farm", 4483362458)

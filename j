@@ -38,13 +38,33 @@ local Events = ReplicatedStorage:WaitForChild("Events")
 local Functions = ReplicatedStorage:WaitForChild("Functions")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 
-local ReplicaController = require(Modules.Libraries:WaitForChild("ReplicaController"))
-local Eggs = require(Modules:WaitForChild("Eggs"))
-local PlayTimeConfig = require(Modules:WaitForChild("playTimeConfig"))
-local Achievements = require(Modules:WaitForChild("Achievements"))
-local IndexRewards = require(Modules:WaitForChild("IndexRewards"))
-local PrestigeConfig = require(Modules:WaitForChild("PrestigeConfig"))
-local UpgradeConfig = require(ReplicatedStorage.NodeTree.Configs:WaitForChild("Nodes")).UpgradeConfig
+local function safeRequire(label, moduleScript, fallback)
+	if not moduleScript then
+		warn("[RebirthHatchers] Missing module:", label)
+		return fallback
+	end
+
+	local success, result = pcall(require, moduleScript)
+	if not success then
+		warn("[RebirthHatchers] Cannot require " .. label .. ":", result)
+		return fallback
+	end
+
+	return result
+end
+
+local Libraries = Modules:FindFirstChild("Libraries")
+local NodeTree = ReplicatedStorage:FindFirstChild("NodeTree")
+local Configs = NodeTree and NodeTree:FindFirstChild("Configs")
+
+local ReplicaController = safeRequire("ReplicaController", Libraries and Libraries:FindFirstChild("ReplicaController"), nil)
+local Eggs = safeRequire("Eggs", Modules:FindFirstChild("Eggs"), { eggs = {} })
+local PlayTimeConfig = safeRequire("playTimeConfig", Modules:FindFirstChild("playTimeConfig"), {})
+local Achievements = safeRequire("Achievements", Modules:FindFirstChild("Achievements"), {})
+local IndexRewards = safeRequire("IndexRewards", Modules:FindFirstChild("IndexRewards"), { EggRewards = {}, TierRewards = {} })
+local PrestigeConfig = safeRequire("PrestigeConfig", Modules:FindFirstChild("PrestigeConfig"), nil)
+local NodesConfig = safeRequire("Nodes", Configs and Configs:FindFirstChild("Nodes"), {})
+local UpgradeConfig = NodesConfig.UpgradeConfig or {}
 
 local Click = Events:WaitForChild("Click")
 local Rebirth = Events:WaitForChild("Rebirth")
@@ -185,6 +205,10 @@ local function buyNextUpgrade()
 end
 
 local function claimPrestige()
+	if not PrestigeConfig or not PrestigeConfig.GetTotal or not PrestigeConfig.GetPrestige then
+		return
+	end
+
 	local currentData = data()
 	local prestigeData = currentData and currentData.PrestigeData
 	if not prestigeData then return end
@@ -305,9 +329,13 @@ RewardTab:CreateToggle({Name = "Auto Claim Rewards", CurrentValue = false, Flag 
 RewardTab:CreateButton({Name = "Claim All Rewards Once", Callback = function() task.spawn(claimRewards) end})
 
 -- Replica
-ReplicaController.ReplicaOfClassCreated("PlayerData", function(replica)
-	playerReplica = replica
-end)
+if ReplicaController and ReplicaController.ReplicaOfClassCreated then
+	ReplicaController.ReplicaOfClassCreated("PlayerData", function(replica)
+		playerReplica = replica
+	end)
+else
+	warn("[RebirthHatchers] ReplicaController unavailable; data-based features are disabled")
+end
 
 -- Main Loops
 runLoop("autoTap", 0.08, function() Click:FireServer() end)
